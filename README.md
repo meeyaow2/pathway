@@ -1,6 +1,6 @@
 # Pathway — Singapore accessibility-first journey prototype
 
-Functional, mobile-responsive MVP with OpenFreeMap/MapLibre basemap, optional official OneMap location search and standard walking API, illustrative planning scenarios, mobility preferences, saved planning scenarios, and unverified community barrier reports.
+Functional, mobile-responsive MVP with OpenFreeMap/MapLibre basemap, address-first official OneMap location search and standard walking API, illustrative planning scenarios, mobility preferences, saved planning scenarios, and unverified community barrier reports.
 
 ## Run (Python 3.10+; no pip packages required)
 
@@ -17,6 +17,14 @@ Pathway uses **MapLibre GL JS + OpenFreeMap** to display interactive Singapore s
 The demo place selectors work immediately. For Singapore-wide address search and real walking directions, configure the **OneMap Search and Routing APIs** as described below. This means the map itself is free, while official Singapore search/routing requires a OneMap developer account and token.
 
 **Safety:** A basemap is not an accessible routing engine. Demo lines are straight conceptual connections; OneMap walking routes are not wheelchair-accessibility-certified. Pathway does not assert step-free access, lift status, shelter, curb or gradient suitability without verified evidence.
+
+## Address-to-address route planning (new default)
+
+Pathway now opens with **From / To address search**, instead of MRT-only dropdowns. Enter a Singapore street address, building name, landmark, or six-digit postal code. Suggestions are fetched from OneMap and displayed below the field; choose the correct match to place it on the map. Use **Swap addresses** or **GPS** for the starting position. Once both positions are selected, choose **Get walking directions** to request a real standard walking route.
+
+Address suggestions and the walking API require the free OneMap developer account and server environment variables described below. If no credentials are configured, choose **Sample places** for a limited offline demo, but those sample lines are not walkable routes. The OpenFreeMap basemap itself remains free without a key.
+
+**Important:** The OneMap walking API does not validate wheelchair accessibility, blind pedestrian navigation, crossing safety, live lift status or sheltered route suitability. These capabilities require separately verified information.
 
 ## Turn on OneMap search + standard walking routes
 
