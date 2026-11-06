@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);const qs=s=>document.querySelectorAll(s)
 const places={orchard:{name:'Orchard MRT',lat:1.3046,lng:103.8318},paragon:{name:'Paragon',lat:1.3035,lng:103.8355},ngeeann:{name:'Ngee Ann City',lat:1.3029,lng:103.8346},somerset:{name:'Somerset MRT',lat:1.3004,lng:103.8390},ion:{name:'ION Orchard',lat:1.3040,lng:103.8318}};
 const scenarios=[{name:'Step-free concept',detail:'This concept prioritises step-free access, but has no verified ramp, curb, gradient or lift observations.'},{name:'Shelter concept',detail:'This concept prioritises sheltered travel, but there is no validated sheltered-pedestrian network connected.'},{name:'Rest-stop concept',detail:'This concept prioritises rest opportunities, but available seating is not independently validated.'}];
 const names={planner:['Find your way, your way.','A route that works for you matters more than the shortest one.'],reports:['Every observation matters.','Community observations with transparent verification status.'],saved:['Saved journeys.','Planning scenarios you can return to.'],about:['About Pathway.','Accessibility information should be accurate and transparent.']};
-const state={page:'planner',mode:'demo',preferences:{stepfree:true,shelter:false,lifts:true,rest:false},scenario:0,access:{blind:false,lowvision:false,mobility:true,hearing:false,cognitive:false},large:false,contrast:false,liveStart:null,liveEnd:null,liveRoute:null,saved:[],reports:[]};
+const state={page:'planner',mode:'live',preferences:{stepfree:true,shelter:false,lifts:true,rest:false},scenario:0,access:{blind:false,lowvision:false,mobility:true,hearing:false,cognitive:false},large:false,contrast:false,liveStart:null,liveEnd:null,liveRoute:null,saved:[],reports:[]};
 try{const a=JSON.parse(localStorage.getItem('pathway-v2')||'{}');state.saved=a.saved||[];state.preferences={...state.preferences,...(a.preferences||{})};state.access={...state.access,...(a.access||{})};state.large=!!a.large;state.contrast=!!a.contrast}catch{}
 const save=()=>{try{localStorage.setItem('pathway-v2',JSON.stringify({saved:state.saved,preferences:state.preferences,access:state.access,large:state.large,contrast:state.contrast}))}catch{}};
 const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -69,15 +69,55 @@ function renderRoutes(){if(state.mode==='live'){
 }
 function changePage(page){state.page=page;['planner','reports','saved','about'].forEach(x=>$(x).classList.toggle('hidden',x!==page));qs('[data-page]').forEach(b=>{if(b.dataset.page===page)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});$('title').textContent=names[page][0];$('subtitle').textContent=names[page][1];if(page==='reports')loadReports();if(page==='saved')renderSaved();if(page==='planner'&&map)setTimeout(()=>map.resize(),40)}
 qs('[data-page]').forEach(b=>b.addEventListener('click',()=>changePage(b.dataset.page)));
-function switchMode(mode){state.mode=mode;state.liveRoute=null;$('demo-fields').classList.toggle('hidden',mode!=='demo');$('live-fields').classList.toggle('hidden',mode!=='live');$('demo-mode').setAttribute('aria-pressed',String(mode==='demo'));$('live-mode').setAttribute('aria-pressed',String(mode==='live'));$('service-mode').textContent=mode==='demo'?'DEMO / UNVERIFIED':'ONEMAP / ACCESS UNVERIFIED';$('safety').textContent=mode==='demo'?'Demo journeys show illustrative straight-line connections only, not real pedestrian pathways. Never use them to navigate.':'OneMap standard walking routes are not certified accessible. Do not assume wheelchair suitability or working lifts.';renderRoutes();drawMap()}
-$('demo-mode').onclick=()=>switchMode('demo');$('live-mode').onclick=()=>switchMode('live');['start','end'].forEach(id=>$(id).onchange=()=>{if($('start').value===$('end').value)toast('Choose different places');drawMap()});
+function switchMode(mode){state.mode=mode;state.liveRoute=null;$('demo-fields').classList.toggle('hidden',mode!=='demo');$('live-fields').classList.toggle('hidden',mode!=='live');$('demo-mode').setAttribute('aria-pressed',String(mode==='demo'));$('live-mode').setAttribute('aria-pressed',String(mode==='live'));$('service-mode').textContent=mode==='demo'?'SAMPLES / UNVERIFIED':'ADDRESS SEARCH / ACCESS UNVERIFIED';$('safety').textContent=mode==='demo'?'Demo journeys show illustrative straight-line connections only, not real pedestrian pathways. Never use them to navigate.':'OneMap standard walking routes are not certified accessible. Do not assume wheelchair suitability or working lifts.';renderRoutes();drawMap()}
+$('demo-mode').onclick=()=>switchMode('demo');$('live-mode').onclick=()=>switchMode('live');$('back-to-address').onclick=()=>switchMode('live');['start','end'].forEach(id=>$(id).onchange=()=>{if($('start').value===$('end').value)toast('Choose different places');drawMap()});
 qs('[data-pref]').forEach(b=>{const k=b.dataset.pref;b.setAttribute('aria-pressed',String(state.preferences[k]));b.addEventListener('click',()=>{state.preferences[k]=!state.preferences[k];b.setAttribute('aria-pressed',String(state.preferences[k]));save();renderRoutes()})});
 $('plan').onclick=async()=>{if(state.mode==='demo'){if($('start').value===$('end').value)return toast('Choose two different places');state.scenario=ranking()[0];renderRoutes();drawMap();toast('Updated illustrative scenarios; not usable routes');return}
- if(!state.liveStart||!state.liveEnd)return toast('Search and select both locations first');$('plan').disabled=true;$('plan').textContent='Searching OneMap…';try{state.liveRoute=await get('/api/route?'+new URLSearchParams({start:`${state.liveStart.lat},${state.liveStart.lng}`,end:`${state.liveEnd.lat},${state.liveEnd.lng}`}));renderRoutes();drawMap();toast('Standard walking route loaded — accessibility unverified')}catch(e){toast(e.message)}finally{$('plan').disabled=false;$('plan').textContent='Find route →'}};
-async function searchLocation(which){const query=$(which+'-search').value.trim();if(query.length<3)return toast('Enter at least 3 characters');let select=$(which+'-results');select.innerHTML='<option>Searching…</option>';
- try{const res=await get('/api/search?q='+encodeURIComponent(query));const results=res.results||[];if(!results.length){select.innerHTML='<option>No results</option>';return}select.innerHTML=results.slice(0,15).map((r,i)=>`<option value="${i}">${esc(r.SEARCHVAL||r.ADDRESS||'Location')} — ${esc(r.POSTAL||'')}</option>`).join('');select._items=results;applyResult(which);toast('Choose the correct search result')}catch(e){select.innerHTML='<option>Search unavailable</option>';toast(e.message)}}
-function applyResult(which){const s=$(which+'-results');const r=s._items?.[+s.value];if(!r)return;const point={name:r.SEARCHVAL||r.ADDRESS||'Place',lat:Number(r.LATITUDE),lng:Number(r.LONGITUDE)};if(!Number.isFinite(point.lat)||!Number.isFinite(point.lng))return;state[which==='start'?'liveStart':'liveEnd']=point;state.liveRoute=null;renderRoutes();drawMap()}
-['start','end'].forEach(w=>{$('lookup-'+w).onclick=()=>searchLocation(w);$(w+'-results').onchange=()=>applyResult(w)});
+ if(!state.liveStart||!state.liveEnd)return toast('Search and select both addresses first');$('plan').disabled=true;$('plan').textContent='Searching OneMap…';try{state.liveRoute=await get('/api/route?'+new URLSearchParams({start:`${state.liveStart.lat},${state.liveStart.lng}`,end:`${state.liveEnd.lat},${state.liveEnd.lng}`}));renderRoutes();drawMap();toast('Standard walking route loaded — accessibility unverified')}catch(e){toast(e.message)}finally{$('plan').disabled=false;$('plan').textContent='Find route →'}};
+const addressCache=new Map(),searchRequest={start:0,end:0},timers={start:null,end:null};
+function chosen(which){return state[which==='start'?'liveStart':'liveEnd']}
+function showSuggestions(which,items){const list=$(which+'-suggestions'),input=$(which+'-search');list.classList.remove('hidden');input.setAttribute('aria-expanded','true');
+ list.innerHTML=items.length?items.slice(0,8).map((r,i)=>'<button type="button" role="option" data-result="'+i+'"><strong>'+esc(r.BUILDING&&r.BUILDING!=='NIL'?r.BUILDING:r.SEARCHVAL||r.ADDRESS)+'</strong><small>'+esc(r.ADDRESS||'')+'</small></button>').join(''):'<div class="notice">No matching Singapore addresses found.</div>';
+ list.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>selectAddress(which,items[Number(b.dataset.result)]));
+}
+function hideSuggestions(which){$(which+'-suggestions').classList.add('hidden');$(which+'-search').setAttribute('aria-expanded','false')}
+function selectAddress(which,r){const point={name:r.ADDRESS||r.SEARCHVAL||'Singapore address',lat:Number(r.LATITUDE),lng:Number(r.LONGITUDE)};
+ if(!Number.isFinite(point.lat)||!Number.isFinite(point.lng))return;
+ state[which==='start'?'liveStart':'liveEnd']=point;state.liveRoute=null;
+ $(which+'-search').value=point.name;$(which+'-search').dataset.selected=point.name;
+ hideSuggestions(which);$('address-status').textContent=(which==='start'?'Start':'Destination')+' set: '+point.name+'. Choose the other address, then Get walking directions.';
+ renderRoutes();drawMap();
+}
+async function searchLocation(which){
+ const query=$(which+'-search').value.trim();if(query.length<3){hideSuggestions(which);return}
+ const seq=++searchRequest[which];$('address-status').textContent='Searching Singapore addresses…';
+ const cacheKey=query.toLowerCase();
+ try{
+  let results=addressCache.get(cacheKey);
+  if(!results){const data=await get('/api/search?q='+encodeURIComponent(query));results=data.results||[];addressCache.set(cacheKey,results)}
+  if(seq!==searchRequest[which])return;
+  showSuggestions(which,results);$('address-status').textContent=results.length?'Select a matching result to place the pin.':'No address matches. Try a six-digit postal code or building name.';
+ }catch(e){if(seq!==searchRequest[which])return;hideSuggestions(which);$('address-status').textContent='Address lookup unavailable: '+e.message+'. Configure OneMap credentials in the server.'}
+}
+['start','end'].forEach(which=>{
+ const input=$(which+'-search');
+ input.addEventListener('input',()=>{
+  state[which==='start'?'liveStart':'liveEnd']=null;state.liveRoute=null;renderRoutes();drawMap();
+  clearTimeout(timers[which]);searchRequest[which]++;
+  if(input.value.trim().length>=3)timers[which]=setTimeout(()=>searchLocation(which),320);else hideSuggestions(which);
+ });
+ input.addEventListener('keydown',e=>{if(e.key==='Escape')hideSuggestions(which);if(e.key==='Enter'){e.preventDefault();const first=$(which+'-suggestions').querySelector('[data-result]');if(first)first.click();else searchLocation(which)}});
+ input.addEventListener('blur',()=>setTimeout(()=>hideSuggestions(which),180));
+});
+$('swap-address').onclick=()=>{const a=state.liveStart,b=state.liveEnd;state.liveStart=b;state.liveEnd=a;
+ const av=$('start-search').value;$('start-search').value=$('end-search').value;$('end-search').value=av;
+ state.liveRoute=null;renderRoutes();drawMap()};
+$('gps-start').onclick=()=>{if(!navigator.geolocation)return $('address-status').textContent='GPS unavailable in this browser.';
+ $('address-status').textContent='Requesting permission for your current position…';
+ navigator.geolocation.getCurrentPosition(p=>{const point={name:'Current location (GPS)',lat:p.coords.latitude,lng:p.coords.longitude};
+ state.liveStart=point;state.liveRoute=null;$('start-search').value='Current location (GPS ±'+Math.round(p.coords.accuracy||0)+' m)';
+ $('address-status').textContent='GPS start set. Accuracy ±'+Math.round(p.coords.accuracy||0)+' m. GPS may not match an accessible entrance.';renderRoutes();drawMap();
+ },()=>{$('address-status').textContent='Current location unavailable or permission denied.'},{enableHighAccuracy:true,timeout:12000})};
 let watchId=null,gpsMarker=null;
 function gpsStatus(t){$('gps-status').textContent=t}
 function gpsUpdate(p){const lat=p.coords.latitude,lng=p.coords.longitude,accuracy=Math.round(p.coords.accuracy||0);if(!Number.isFinite(lat)||!Number.isFinite(lng))return;
