@@ -1,6 +1,6 @@
 # Pathway — Singapore accessibility-first journey prototype
 
-Functional, mobile-responsive MVP with OneMap basemap, optional official location search and standard walking API, illustrative planning scenarios, mobility preferences, saved planning scenarios, and unverified community barrier reports.
+Functional, mobile-responsive MVP with OpenFreeMap/MapLibre basemap, optional official OneMap location search and standard walking API, illustrative planning scenarios, mobility preferences, saved planning scenarios, and unverified community barrier reports.
 
 ## Run (Python 3.10+; no pip packages required)
 
@@ -8,18 +8,15 @@ Functional, mobile-responsive MVP with OneMap basemap, optional official locatio
 cd pathway
 python server.py
 ```
-Open http://127.0.0.1:8765 . An internet connection is needed for Leaflet (CDN) and the OneMap basemap.
+Open http://127.0.0.1:8765 . An internet connection is needed for MapLibre (CDN) and OpenFreeMap map tiles.
 
-## Optional Google Maps basemap
+## Free Singapore map (no key or card required)
 
-Pathway now has a **OneMap / Google Maps** switch in the route planner. OneMap remains the default and works without a Google key. For Google's interactive map:
+Pathway uses **MapLibre GL JS + OpenFreeMap** to display interactive Singapore streets with touch gestures, markers, popups, zoom controls, and route overlays. Choose **Streets** or **Minimal** above the map. The map tiles require internet access but **no Google Maps key or billing account**.
 
-1. Create a Google Cloud project and enable **Maps JavaScript API** and billing.
-2. Create a **browser API key** restricted to **Maps JavaScript API** and your website's **HTTP referrer(s)** (include localhost when testing).
-3. Edit `config.js` and set `window.PATHWAY_GOOGLE_MAPS_KEY` to the restricted browser key.
-4. Restart/reload the website and choose **Google Maps** above the map.
+The demo place selectors work immediately. For Singapore-wide address search and real walking directions, configure the **OneMap Search and Routing APIs** as described below. This means the map itself is free, while official Singapore search/routing requires a OneMap developer account and token.
 
-The map key is loaded in the browser, so it **must be restricted**; do not place server credentials in this file. Usage may incur charges. Google Maps serves as the basemap and display layer; any OneMap walking geometry is still attributed to OneMap, and neither provider implies wheelchair accessibility. Demo lines are illustrative straight connections, **not safe navigation directions**. If the Google key is missing, the app stays on OneMap.
+**Safety:** A basemap is not an accessible routing engine. Demo lines are straight conceptual connections; OneMap walking routes are not wheelchair-accessibility-certified. Pathway does not assert step-free access, lift status, shelter, curb or gradient suitability without verified evidence.
 
 ## Turn on OneMap search + standard walking routes
 
