@@ -57,12 +57,25 @@ function selectStyle(style){
 }
 function decodePolyline(str){let index=0,lat=0,lng=0,points=[];while(index<str.length){let b,shift=0,result=0;do{b=str.charCodeAt(index++)-63;result|=(b&31)<<shift;shift+=5}while(b>=32);lat+=(result&1)?~(result>>1):(result>>1);shift=0;result=0;do{b=str.charCodeAt(index++)-63;result|=(b&31)<<shift;shift+=5}while(b>=32);lng+=(result&1)?~(result>>1):(result>>1);points.push([lat/1e5,lng/1e5])}return points}
 function ranking(){const s=[(state.preferences.stepfree?3:0)+(state.preferences.lifts?2:0),state.preferences.shelter?5:0,state.preferences.rest?5:0];return [0,1,2].sort((a,b)=>s[b]-s[a]||a-b)}
+function friendlyDistance(m){const n=Number(m);return Number.isFinite(n)?n>=1000?(n/1000).toFixed(1)+' km':Math.round(n)+' m':'Distance unavailable'}
+function friendlyDuration(seconds){const n=Number(seconds);if(!Number.isFinite(n))return 'Time unavailable';const min=Math.max(1,Math.round(n/60));return min>=60?Math.floor(min/60)+' hr '+(min%60)+' min':min+' min'}
 function renderRoutes(){if(state.mode==='live'){
  const r=state.liveRoute?.data;
- $('route-source').textContent=r?'OneMap walking API':'Awaiting search';
- $('routes').innerHTML=r?'<div class="route-card active"><strong>Standard walking route</strong><p>Official walking geometry — accessibility unverified.</p><p>'+esc(r.route_summary?.total_distance??'—')+' m · '+esc(r.route_summary?.total_time??'—')+' s (API values)</p></div>':'<div class="notice">Find two Singapore locations, then request a standard walking route.</div>';
- $('details-title').textContent=r?'Standard walking route':'No route loaded';$('route-detail').textContent=r?'OneMap walking instructions do not establish step-free access, lift status, ramp suitability, or shelter. Do not treat this as an accessible route.':'OneMap location search requires configured credentials.';
- $('steps').innerHTML=(r?.route_instructions||[]).slice(0,12).map(x=>'<div class="step">'+esc(x[9]||x[0]||'Walking instruction')+'</div>').join('');return;}
+ $('route-source').textContent=r?'OneMap walking':'Awaiting addresses';
+ if(r){
+  const summary=r.route_summary||{};
+  $('routes').innerHTML='<div class="route-card active"><div class="row"><strong>Walking route</strong><span class="flag">Accessibility unverified</span></div><div class="route-metrics"><span><strong>'+esc(friendlyDuration(summary.total_time))+'</strong><small>Estimated walking time</small></span><span><strong>'+esc(friendlyDistance(summary.total_distance))+'</strong><small>Distance</small></span></div><p>OneMap standard pedestrian directions. No verified step-free, tactile paving or crossing data.</p></div>';
+  $('details-title').textContent='Step-by-step walking directions';
+  $('route-detail').textContent='Directions are provided by OneMap. GPS is approximate. Do not rely on these directions for independent accessible navigation without verified supporting information.';
+  const directions=(Array.isArray(r.route_instructions)?r.route_instructions:[]).slice(0,60);
+  $('steps').innerHTML=directions.length?directions.map((x,i)=>'<div class="step"><strong>Step '+(i+1)+'</strong> '+esc(Array.isArray(x)?(x[9]||x[0]||'Proceed'):String(x))+' <span class="muted">'+esc(Array.isArray(x)?(x[5]||''):'')+'</span></div>').join(''):'<div class="step">A route was returned but no step instructions are available.</div>';
+ }else{
+  $('routes').innerHTML='<div class="notice">Search and choose two Singapore addresses, then select Get walking directions. Accessibility is not verified.</div>';
+  $('details-title').textContent='Walking directions';
+  $('route-detail').textContent='Your selected addresses will appear on the map. Walking directions require a valid OneMap server token.';
+  $('steps').innerHTML='';
+ }
+ return;}
  $('route-source').textContent='Concept only';$('routes').innerHTML=ranking().map(i=>`<button class="route-card ${i===state.scenario?'active':''}" data-scenario="${i}" aria-pressed="${state.scenario===i}"><div class="row"><strong>${scenarios[i].name}</strong>${ranking()[0]===i?'<span class="flag">Preference match</span>':''}</div><p>No actual walkway geometry · No measured distance</p></button>`).join('');
  qs('[data-scenario]').forEach(b=>b.addEventListener('click',()=>{state.scenario=+b.dataset.scenario;renderRoutes()}));
  $('details-title').textContent=scenarios[state.scenario].name;$('route-detail').textContent=scenarios[state.scenario].detail;$('steps').innerHTML='<div class="step">① Illustrative straight-line connection, not an actual walkway</div><div class="step">② No verified obstacle, lift or slope information</div><div class="step">③ Do not use for physical navigation</div>';
