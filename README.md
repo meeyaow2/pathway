@@ -18,6 +18,20 @@ The demo place selectors work immediately. For Singapore-wide address search and
 
 **Safety:** A basemap is not an accessible routing engine. Demo lines are straight conceptual connections; OneMap walking routes are not wheelchair-accessibility-certified. Pathway does not assert step-free access, lift status, shelter, curb or gradient suitability without verified evidence.
 
+## GPS journey progress preview
+
+When you select two Singapore addresses and load a real **OneMap standard walking route**, choose **Follow** to opt into browser GPS updates. The Journey progress preview shows:
+
+- An approximate position along the returned walking geometry, calculated locally in your browser.
+- Approximate remaining distance along the route.
+- The browser-reported GPS accuracy.
+- Warnings when GPS accuracy is poor or the estimated position appears far from the route.
+- A **Read update** button for optional spoken status, plus an explicit **Recalculate from GPS** button that requests a new OneMap walking route.
+
+Location follow stops when you choose **Stop GPS** or the page becomes hidden. Pathway does not save your GPS history to its database. GPS must be permitted by the browser, usually on HTTPS or localhost.
+
+**Safety:** This is an experimental progress preview, *not* turn-by-turn navigation or an accessible pedestrian navigation aid. No automatic rerouting, crossing instructions, environmental hazard detection, or wheelchair/blind-route assurance is provided. Do not treat GPS proximity as confirmation of arrival at a safe or accessible entrance. Demo straight-line routes are deliberately excluded from GPS route matching.
+
 ## Address-to-address route planning (new default)
 
 Pathway now opens with **From / To address search**, instead of MRT-only dropdowns. Enter a Singapore street address, building name, landmark, or six-digit postal code. Suggestions are fetched from OneMap and displayed below the field; choose the correct match to place it on the map. Use **Swap addresses** or **GPS** for the starting position. Once both positions are selected, choose **Get walking directions** to request a real standard walking route.
