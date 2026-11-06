@@ -1,1 +1,2 @@
-// Optional Google Maps JavaScript API browser key. Restrict to Maps JavaScript API and your website's HTTP referrers.\nwindow.PATHWAY_GOOGLE_MAPS_KEY = '';\n
+// Optional Maps JavaScript API key. Restrict this browser key by website HTTP referrer and API.
+window.PATHWAY_GOOGLE_MAPS_KEY = '';
