@@ -8,6 +8,39 @@ try{const a=JSON.parse(localStorage.getItem('pathway-v2')||'{}');state.saved=a.s
 const save=()=>{try{localStorage.setItem('pathway-v2',JSON.stringify({saved:state.saved,preferences:state.preferences}))}catch{}};
 const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let map,markers=[],line,liveGeometryLayer,livePossible=false;
+let mapProvider='onemap', googleMap=null, googleObjects=[],googleReady=false;
+function updateProviderButtons(){['onemap','google'].forEach(p=>{$('provider-'+p).setAttribute('aria-pressed',String(mapProvider===p))})}
+async function loadGoogle(){
+ if(window.google?.maps?.Map)return;
+ const key=String(window.PATHWAY_GOOGLE_MAPS_KEY||'').trim();
+ if(!key)throw Error('Google Maps needs an API key. Add your restricted browser key in config.js.');
+ if(!window._pathwayGooglePromise){
+  window._pathwayGooglePromise=new Promise((resolve,reject)=>{
+    const callback='__pathwayGoogleLoaded';
+    const timeout=setTimeout(()=>{delete window[callback];reject(Error('Google Maps loading timed out'))},15000);
+    window[callback]=()=>{clearTimeout(timeout);delete window[callback];resolve()};
+    const script=document.createElement('script');
+    script.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+callback+'&v=weekly';
+    script.async=true;script.onerror=()=>{clearTimeout(timeout);reject(Error('Google Maps could not load. Check key, billing and website restrictions.'))};
+    document.head.appendChild(script);
+  }).catch(e=>{window._pathwayGooglePromise=null;throw e});
+ }
+ await window._pathwayGooglePromise;
+}
+async function switchMapProvider(provider){
+ if(provider===mapProvider)return;
+ if(provider==='google'){
+  try{await loadGoogle()}catch(e){toast(e.message);return}
+  if(map){map.remove();map=null;markers=[];line=null;liveGeometryLayer=null}
+  $('map').innerHTML='';
+  googleMap=new google.maps.Map($('map'),{center:{lat:1.3035,lng:103.8345},zoom:16,mapTypeControl:false,streetViewControl:false,fullscreenControl:true,gestureHandling:'greedy'});
+  googleReady=true;mapProvider='google';
+ }else{
+  googleObjects.forEach(o=>o.setMap(null));googleObjects=[];googleMap=null;googleReady=false;mapProvider='onemap';setupMap();
+ }
+ updateProviderButtons();drawMap();
+}
+
 function toast(t){$('toast').textContent=t;$('toast').style.display='block';clearTimeout(window._timer);window._timer=setTimeout(()=>$('toast').style.display='none',3100)}
 async function get(path){const r=await fetch(path);const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
 function setupMap(){if(!window.L){$('map').innerHTML='<div class="map-fallback"><div><h2>Map library unavailable</h2><p>Connect to the internet to load the OneMap-backed interactive map.</p></div></div>';return}
@@ -15,7 +48,22 @@ function setupMap(){if(!window.L){$('map').innerHTML='<div class="map-fallback">
  L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png',{maxZoom:19,minZoom:11,attribution:'<a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener">Singapore Land Authority</a>'}).addTo(map);
  drawMap();}
 function placePair(){if(state.mode==='live'){return [state.liveStart,state.liveEnd]}return [places[$('start').value],places[$('end').value]]}
-function drawMap(){if(!map)return;markers.forEach(m=>map.removeLayer(m));markers=[];if(line)map.removeLayer(line);if(liveGeometryLayer)map.removeLayer(liveGeometryLayer);line=null;liveGeometryLayer=null;
+function drawMap(){
+ if(mapProvider==='google'){
+  if(!googleMap||!window.google?.maps)return;
+  googleObjects.forEach(o=>o.setMap(null));googleObjects=[];
+  const [a,b]=placePair();if(!a||!b)return;
+  [a,b].forEach((p,i)=>googleObjects.push(new google.maps.Marker({map:googleMap,position:{lat:p.lat,lng:p.lng},title:(i?'Destination: ':'Start: ')+p.name,label:i?'B':'A'})));
+  let geometry=[];
+  if(state.liveRoute?.data?.route_geometry&&state.mode==='live'){
+    try{geometry=decodePolyline(state.liveRoute.data.route_geometry).map(p=>({lat:p[0],lng:p[1]}))}catch(e){toast('Could not decode OneMap walking geometry')}
+  }else if(state.mode==='demo'&&(a.lat!==b.lat||a.lng!==b.lng)){
+    geometry=[{lat:a.lat,lng:a.lng},{lat:b.lat,lng:b.lng}];
+  }
+  if(geometry.length>1)googleObjects.push(new google.maps.Polyline({map:googleMap,path:geometry,strokeColor:'#0b7669',strokeOpacity:.9,strokeWeight:5,icons:state.mode==='demo'?[{icon:{path:'M 0,-1 0,1',strokeOpacity:1,scale:3},offset:'0',repeat:'18px'}]:undefined}));
+  const bounds=new google.maps.LatLngBounds();bounds.extend({lat:a.lat,lng:a.lng});bounds.extend({lat:b.lat,lng:b.lng});googleMap.fitBounds(bounds,70);return;
+ }
+ if(!map)return;markers.forEach(m=>map.removeLayer(m));markers=[];if(line)map.removeLayer(line);if(liveGeometryLayer)map.removeLayer(liveGeometryLayer);line=null;liveGeometryLayer=null;
  const [a,b]=placePair();if(!a||!b)return;
  for(const [i,p] of [a,b].entries()){const icon=L.divIcon({className:'',html:`<div class="pin ${i?'end':''}">${i?'B':'A'}</div>`,iconSize:[30,30],iconAnchor:[15,15]});markers.push(L.marker([p.lat,p.lng],{icon}).addTo(map).bindPopup(esc(p.name)))}
  if(state.liveRoute?.data?.route_geometry && state.mode==='live'){
@@ -34,7 +82,7 @@ function renderRoutes(){if(state.mode==='live'){
  qs('[data-scenario]').forEach(b=>b.addEventListener('click',()=>{state.scenario=+b.dataset.scenario;renderRoutes()}));
  $('details-title').textContent=scenarios[state.scenario].name;$('route-detail').textContent=scenarios[state.scenario].detail;$('steps').innerHTML='<div class="step">① Illustrative straight-line connection, not an actual walkway</div><div class="step">② No verified obstacle, lift or slope information</div><div class="step">③ Do not use for physical navigation</div>';
 }
-function changePage(page){state.page=page;['planner','reports','saved','about'].forEach(x=>$(x).classList.toggle('hidden',x!==page));qs('[data-page]').forEach(b=>{if(b.dataset.page===page)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});$('title').textContent=names[page][0];$('subtitle').textContent=names[page][1];if(page==='reports')loadReports();if(page==='saved')renderSaved();if(page==='planner'&&map)setTimeout(()=>map.invalidateSize(),20)}
+function changePage(page){state.page=page;['planner','reports','saved','about'].forEach(x=>$(x).classList.toggle('hidden',x!==page));qs('[data-page]').forEach(b=>{if(b.dataset.page===page)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});$('title').textContent=names[page][0];$('subtitle').textContent=names[page][1];if(page==='reports')loadReports();if(page==='saved')renderSaved();if(page==='planner'&&map)setTimeout(()=>map.invalidateSize(),20);if(page==='planner'&&googleMap)setTimeout(()=>google.maps.event.trigger(googleMap,'resize'),20)}
 qs('[data-page]').forEach(b=>b.addEventListener('click',()=>changePage(b.dataset.page)));
 function switchMode(mode){state.mode=mode;state.liveRoute=null;$('demo-fields').classList.toggle('hidden',mode!=='demo');$('live-fields').classList.toggle('hidden',mode!=='live');$('demo-mode').setAttribute('aria-pressed',String(mode==='demo'));$('live-mode').setAttribute('aria-pressed',String(mode==='live'));$('service-mode').textContent=mode==='demo'?'DEMO / UNVERIFIED':'ONEMAP / ACCESS UNVERIFIED';$('safety').textContent=mode==='demo'?'Demo journeys show illustrative straight-line connections only, not real pedestrian pathways. Never use them to navigate.':'OneMap standard walking routes are not certified accessible. Do not assume wheelchair suitability or working lifts.';renderRoutes();drawMap()}
 $('demo-mode').onclick=()=>switchMode('demo');$('live-mode').onclick=()=>switchMode('live');['start','end'].forEach(id=>$(id).onchange=()=>{if($('start').value===$('end').value)toast('Choose different places');drawMap()});
@@ -45,7 +93,7 @@ async function searchLocation(which){const query=$(which+'-search').value.trim()
  try{const res=await get('/api/search?q='+encodeURIComponent(query));const results=res.results||[];if(!results.length){select.innerHTML='<option>No results</option>';return}select.innerHTML=results.slice(0,15).map((r,i)=>`<option value="${i}">${esc(r.SEARCHVAL||r.ADDRESS||'Location')} — ${esc(r.POSTAL||'')}</option>`).join('');select._items=results;applyResult(which);toast('Choose the correct search result')}catch(e){select.innerHTML='<option>Search unavailable</option>';toast(e.message)}}
 function applyResult(which){const s=$(which+'-results');const r=s._items?.[+s.value];if(!r)return;const point={name:r.SEARCHVAL||r.ADDRESS||'Place',lat:Number(r.LATITUDE),lng:Number(r.LONGITUDE)};if(!Number.isFinite(point.lat)||!Number.isFinite(point.lng))return;state[which==='start'?'liveStart':'liveEnd']=point;state.liveRoute=null;renderRoutes();drawMap()}
 ['start','end'].forEach(w=>{$('lookup-'+w).onclick=()=>searchLocation(w);$(w+'-results').onchange=()=>applyResult(w)});
-$('locate').onclick=()=>{if(!navigator.geolocation)return toast('Geolocation not available');navigator.geolocation.getCurrentPosition(p=>{if(map)map.setView([p.coords.latitude,p.coords.longitude],16);toast('Map centred near your location — not used for routing')},()=>toast('Location permission denied or unavailable'),{enableHighAccuracy:false,timeout:7000})};
+$('locate').onclick=()=>{if(!navigator.geolocation)return toast('Geolocation not available');navigator.geolocation.getCurrentPosition(p=>{if(mapProvider==='google'&&googleMap){googleMap.setCenter({lat:p.coords.latitude,lng:p.coords.longitude});googleMap.setZoom(16)}else if(map)map.setView([p.coords.latitude,p.coords.longitude],16);toast('Map centred near your location — not used for routing')},()=>toast('Location permission denied or unavailable'),{enableHighAccuracy:false,timeout:7000})};
 $('save').onclick=()=>{if(state.mode==='demo'&&$('start').value===$('end').value)return toast('Choose different places');const [a,b]=placePair();if(!a||!b)return toast('Select both locations');state.saved.unshift({id:Date.now(),from:a.name,to:b.name,mode:state.mode,preferences:{...state.preferences},created:new Date().toLocaleDateString('en-SG')});state.saved=state.saved.slice(0,40);save();toast('Planning scenario saved in this browser')};
 function renderSaved(){$('saved-list').innerHTML=state.saved.length?state.saved.map(x=>`<div class="report"><div><strong>${esc(x.from)} → ${esc(x.to)}</strong><p>${esc(x.mode)} planning scenario · ${esc(x.created)} · Not a verified route</p></div><button class="outline" data-remove="${x.id}">Remove</button></div>`).join(''):'<div class="notice">No saved journeys yet. Plan a scenario and press Save.</div>';qs('[data-remove]').forEach(b=>b.onclick=()=>{state.saved=state.saved.filter(x=>String(x.id)!==b.dataset.remove);save();renderSaved()})}
 function openModal(){$('modal').classList.remove('hidden');$('where').focus()}function closeModal(){$('modal').classList.add('hidden')}
@@ -53,5 +101,7 @@ $('report').onclick=openModal;$('new-report').onclick=openModal;$('close-modal')
 $('report-form').onsubmit=async e=>{e.preventDefault();const payload={location:$('where').value.trim(),category:$('category').value,description:$('description').value.trim()};
  try{const r=await fetch('/api/reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.error||'Submission failed');$('report-form').reset();closeModal();changePage('reports');toast('Report submitted as unverified')}catch(err){toast(err.message)}};
 async function loadReports(){try{const data=await get('/api/reports');$('report-count').textContent=data.reports.length;$('report-list').innerHTML=data.reports.length?data.reports.map(x=>`<div class="report"><div><strong>${esc(x.category)}</strong><p>${esc(x.location)} · ${new Date(x.created_at*1000).toLocaleDateString('en-SG')}</p><p>${esc(x.description)}</p></div><span>Unverified</span></div>`).join(''):'<div class="notice">No submissions yet. Start by reporting a potential accessibility obstacle.</div>'}catch(e){$('report-list').innerHTML='<div class="callout">Could not load reports: '+esc(e.message)+'</div>'}}
+$('provider-onemap').onclick=()=>switchMapProvider('onemap');
+$('provider-google').onclick=()=>switchMapProvider('google');
 async function startup(){setupMap();renderRoutes();try{const res=await get('/api/status');if(res.onemap_connected){$('live-mode').title='OneMap credentials configured';}else{$('live-mode').title='Requires OneMap credentials configured on server'}}catch{} }startup();
 })();
