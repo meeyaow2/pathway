@@ -19,6 +19,22 @@ def init():
 init()
 
 def token():
+    # A short-lived token can be supplied securely via the server environment.
+    # Never commit the token or expose it to the client.
+    provided=os.environ.get('ONEMAP_TOKEN','').strip()
+    if provided:
+        try:
+            import base64
+            payload=provided.split('.')[1]
+            payload+='='*(-len(payload)%4)
+            expiry=json.loads(base64.urlsafe_b64decode(payload)).get('exp')
+            if expiry and time.time()>=int(expiry)-30:
+                raise ValueError('Configured OneMap token has expired. Generate a new token or configure account credentials for automatic renewal.')
+        except (IndexError,ValueError,TypeError,json.JSONDecodeError) as exc:
+            if isinstance(exc,ValueError) and 'expired' in str(exc):raise
+            # Opaque tokens are still supported; OneMap will validate them.
+            pass
+        return provided
     with _lock:
         if _token['value'] and _token['expires']>time.time()+120: return _token['value']
         email=os.environ.get('ONEMAP_EMAIL');pwd=os.environ.get('ONEMAP_PASSWORD')
@@ -31,7 +47,7 @@ def token():
 
 def api_get(endpoint,params):
     t=token()
-    if not t:raise ValueError('OneMap credentials not configured')
+    if not t:raise ValueError('OneMap credentials not configured. Set ONEMAP_TOKEN or ONEMAP_EMAIL and ONEMAP_PASSWORD on the server.')
     url='https://www.onemap.gov.sg'+endpoint+'?'+urllib.parse.urlencode(params)
     req=urllib.request.Request(url,headers={'Authorization':t,'Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=15) as r:return json.load(r)
@@ -56,7 +72,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not route.path.startswith('/api/'):return super().do_GET()
         q=urllib.parse.parse_qs(route.query)
         try:
-            if route.path=='/api/status':return self.respond(200,{'onemap_connected':bool(os.getenv('ONEMAP_EMAIL') and os.getenv('ONEMAP_PASSWORD')),'bfa_enabled':False,'routing_type':'standard_walking_only'})
+            if route.path=='/api/status':return self.respond(200,{'onemap_connected':bool(os.getenv('ONEMAP_TOKEN') or (os.getenv('ONEMAP_EMAIL') and os.getenv('ONEMAP_PASSWORD'))),'bfa_enabled':False,'routing_type':'standard_walking_only'})
             if route.path=='/api/reports':
                 with connect() as c: rows=[dict(r) for r in c.execute('SELECT * FROM reports ORDER BY created_at DESC LIMIT 100')]
                 return self.respond(200,{'reports':rows})
@@ -70,6 +86,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.respond(200,{'source':'OneMap standard walking API','accessibility_verified':False,'data':data})
             return self.respond(404,{'error':'Unknown endpoint'})
         except ValueError as e:return self.respond(400,{'error':str(e)})
+        except urllib.error.HTTPError as e:
+            if e.code in (401,403):return self.respond(502,{'error':'OneMap rejected the token or access is not permitted. Check token expiry and API permissions.'})
+            if e.code==429:return self.respond(429,{'error':'OneMap rate limit reached. Try again later.'})
+            return self.respond(502,{'error':'OneMap service returned an error.'})
         except (urllib.error.URLError,TimeoutError) as e:return self.respond(502,{'error':'OneMap API unavailable. Check credentials and network.'})
         except Exception as e:return self.respond(500,{'error':'Unable to complete request'})
     def do_POST(self):
