@@ -26,6 +26,26 @@ Address suggestions and the walking API require the free OneMap developer accoun
 
 **Important:** The OneMap walking API does not validate wheelchair accessibility, blind pedestrian navigation, crossing safety, live lift status or sheltered route suitability. These capabilities require separately verified information.
 
+## Configure a OneMap access token safely
+
+The backend accepts `ONEMAP_TOKEN` as an environment variable. **Never paste a token into GitHub, config.js, or browser code.** Access tokens expire after about 72 hours and cannot refresh themselves; for automatic renewal use the OneMap registered email/password server-side, as documented below.
+
+PowerShell (current terminal session only):
+
+```powershell
+$env:ONEMAP_TOKEN = '<paste a newly issued token in your own terminal>'
+python server.py
+```
+
+Mac / Linux (current terminal session only):
+
+```bash
+export ONEMAP_TOKEN='<paste a newly issued token in your own terminal>'
+python server.py
+```
+
+Do not share tokens in chat, commit them or put them in public deployment configuration. For deployment, use the hosting provider's encrypted environment-variable settings. Once authenticated, search by Singapore postal code, address or building name; select results to display standard walking directions. If the token expires, replace it or configure refresh credentials.
+
 ## Turn on OneMap search + standard walking routes
 
 Register for a OneMap account at https://www.onemap.gov.sg/apidocs/ . Set `ONEMAP_EMAIL` and `ONEMAP_PASSWORD` in your terminal before starting the server. The server keeps credentials private, exchanges them for an expiring token, and proxies requests. Do NOT add secrets to frontend source. Copy `.env.example` for reference; this small dependency-free example does **not** automatically read `.env`.
