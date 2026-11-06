@@ -10,6 +10,17 @@ python server.py
 ```
 Open http://127.0.0.1:8765 . An internet connection is needed for Leaflet (CDN) and the OneMap basemap.
 
+## Optional Google Maps basemap
+
+Pathway now has a **OneMap / Google Maps** switch in the route planner. OneMap remains the default and works without a Google key. For Google's interactive map:
+
+1. Create a Google Cloud project and enable **Maps JavaScript API** and billing.
+2. Create a **browser API key** restricted to **Maps JavaScript API** and your website's **HTTP referrer(s)** (include localhost when testing).
+3. Edit `config.js` and set `window.PATHWAY_GOOGLE_MAPS_KEY` to the restricted browser key.
+4. Restart/reload the website and choose **Google Maps** above the map.
+
+The map key is loaded in the browser, so it **must be restricted**; do not place server credentials in this file. Usage may incur charges. Google Maps serves as the basemap and display layer; any OneMap walking geometry is still attributed to OneMap, and neither provider implies wheelchair accessibility. Demo lines are illustrative straight connections, **not safe navigation directions**. If the Google key is missing, the app stays on OneMap.
+
 ## Turn on OneMap search + standard walking routes
 
 Register for a OneMap account at https://www.onemap.gov.sg/apidocs/ . Set `ONEMAP_EMAIL` and `ONEMAP_PASSWORD` in your terminal before starting the server. The server keeps credentials private, exchanges them for an expiring token, and proxies requests. Do NOT add secrets to frontend source. Copy `.env.example` for reference; this small dependency-free example does **not** automatically read `.env`.
