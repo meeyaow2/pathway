@@ -5,7 +5,7 @@ Functional, mobile-responsive MVP with OneMap basemap, optional official locatio
 ## Run (Python 3.10+; no pip packages required)
 
 ```bash
-cd pathway-app
+cd pathway
 python server.py
 ```
 Open http://127.0.0.1:8765 . An internet connection is needed for Leaflet (CDN) and the OneMap basemap.
