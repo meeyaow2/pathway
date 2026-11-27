@@ -310,3 +310,10 @@ html.pw-contrast .chip[aria-pressed=true] small{color:var(--white)}
 
 @media (prefers-reduced-motion:reduce){ *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important} }
 @media (forced-colors:active){ .chip[aria-pressed=true],.route-card[aria-pressed=true],.fab[aria-pressed=true],.tabbar button[aria-current=page]{outline:3px solid Highlight} }
+
+/* Map loading feedback: visible above the canvas on slow mobile networks. */
+#map{position:relative}
+.map-load-status{position:absolute;z-index:15;left:50%;top:50%;transform:translate(-50%,-50%);max-width:min(330px,calc(100% - 36px));padding:14px 16px;border-radius:12px;background:rgba(252,250,255,.96);box-shadow:0 5px 28px rgba(35,18,58,.15);color:#241b35;text-align:center;font-size:13px;line-height:1.45;border:1px solid #d5c6ec}
+.map-load-status[hidden],.map-load-status button[hidden]{display:none}
+.map-load-status button{margin:8px 4px 0;border:1px solid #6941c6;color:#5326a9;background:#fff;border-radius:7px;min-height:44px;padding:8px 12px;font-weight:650;cursor:pointer}
+.map-load-status button:focus-visible{outline:3px solid #6941c6;outline-offset:3px}
