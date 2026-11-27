@@ -66,13 +66,18 @@ class Handler(SimpleHTTPRequestHandler):
     def body(self):
         size=int(self.headers.get('Content-Length','0'))
         if size>12000:raise ValueError('Payload too large')
-        return json.loads(self.rfile.read(size) or b'{}')
+        data=json.loads(self.rfile.read(size) or b'{}')
+        if not isinstance(data,dict):raise ValueError('Invalid request body')
+        return data
     def do_GET(self):
         route=urllib.parse.urlsplit(self.path)
         if not route.path.startswith('/api/'):return super().do_GET()
         q=urllib.parse.parse_qs(route.query)
         try:
-            if route.path=='/api/status':return self.respond(200,{'onemap_connected':bool(os.getenv('ONEMAP_TOKEN') or (os.getenv('ONEMAP_EMAIL') and os.getenv('ONEMAP_PASSWORD'))),'bfa_enabled':False,'routing_type':'standard_walking_only'})
+            if route.path=='/api/status':
+                try:connected=bool(token())
+                except Exception:connected=False
+                return self.respond(200,{'onemap_connected':connected,'bfa_enabled':False,'routing_type':'standard_walking_only'})
             if route.path=='/api/reports':
                 with connect() as c: rows=[dict(r) for r in c.execute('SELECT * FROM reports ORDER BY created_at DESC LIMIT 100')]
                 return self.respond(200,{'reports':rows})

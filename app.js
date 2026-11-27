@@ -86,7 +86,7 @@ function switchMode(mode){state.mode=mode;state.liveRoute=null;refreshJourneyRou
 $('demo-mode').onclick=()=>switchMode('demo');$('live-mode').onclick=()=>switchMode('live');$('back-to-address').onclick=()=>switchMode('live');['start','end'].forEach(id=>$(id).onchange=()=>{if($('start').value===$('end').value)toast('Choose different places');drawMap()});
 qs('[data-pref]').forEach(b=>{const k=b.dataset.pref;b.setAttribute('aria-pressed',String(state.preferences[k]));b.addEventListener('click',()=>{state.preferences[k]=!state.preferences[k];b.setAttribute('aria-pressed',String(state.preferences[k]));save();renderRoutes()})});
 $('plan').onclick=async()=>{if(state.mode==='demo'){if($('start').value===$('end').value)return toast('Choose two different places');state.scenario=ranking()[0];renderRoutes();drawMap();toast('Updated illustrative scenarios; not usable routes');return}
- if(!state.liveStart||!state.liveEnd)return toast('Search and select both addresses first');$('plan').disabled=true;$('plan').textContent='Searching OneMap…';try{state.liveRoute=await get('/api/route?'+new URLSearchParams({start:`${state.liveStart.lat},${state.liveStart.lng}`,end:`${state.liveEnd.lat},${state.liveEnd.lng}`}));renderRoutes();drawMap();refreshJourneyRoute();toast('Standard walking route loaded — accessibility unverified')}catch(e){toast(e.message)}finally{$('plan').disabled=false;$('plan').textContent='Find route →'}};
+ if(!state.liveStart||!state.liveEnd)return toast('Search and select both addresses first');$('plan').disabled=true;$('plan').textContent='Searching OneMap…';try{state.liveRoute=await get('/api/route?'+new URLSearchParams({start:`${state.liveStart.lat},${state.liveStart.lng}`,end:`${state.liveEnd.lat},${state.liveEnd.lng}`}));renderRoutes();drawMap();refreshJourneyRoute();toast('Standard walking route loaded — accessibility unverified')}catch(e){toast(e.message)}finally{$('plan').disabled=false;$('plan').textContent='Get walking directions →'}};
 const addressCache=new Map(),searchRequest={start:0,end:0},timers={start:null,end:null};
 function chosen(which){return state[which==='start'?'liveStart':'liveEnd']}
 function showSuggestions(which,items){const list=$(which+'-suggestions'),input=$(which+'-search');list.classList.remove('hidden');input.setAttribute('aria-expanded','true');
@@ -119,8 +119,17 @@ async function searchLocation(which){
   clearTimeout(timers[which]);searchRequest[which]++;
   if(input.value.trim().length>=3)timers[which]=setTimeout(()=>searchLocation(which),320);else hideSuggestions(which);
  });
- input.addEventListener('keydown',e=>{if(e.key==='Escape')hideSuggestions(which);if(e.key==='Enter'){e.preventDefault();const first=$(which+'-suggestions').querySelector('[data-result]');if(first)first.click();else searchLocation(which)}});
- input.addEventListener('blur',()=>setTimeout(()=>hideSuggestions(which),180));
+ const list=$(which+'-suggestions');
+ input.addEventListener('keydown',e=>{const opts=[...list.querySelectorAll('[data-result]')];
+  if(e.key==='ArrowDown'&&opts.length){e.preventDefault();opts[0].focus()}
+  if(e.key==='Escape')hideSuggestions(which);
+  if(e.key==='Enter'){e.preventDefault();if(opts[0])opts[0].click();else searchLocation(which)}});
+ list.addEventListener('keydown',e=>{const opts=[...list.querySelectorAll('[data-result]')],i=opts.indexOf(document.activeElement);
+  if(e.key==='ArrowDown'){e.preventDefault();opts[Math.min(i+1,opts.length-1)]?.focus()}
+  if(e.key==='ArrowUp'){e.preventDefault();if(i<=0)input.focus();else opts[i-1].focus()}
+  if(e.key==='Escape'){e.preventDefault();hideSuggestions(which);input.focus()}});
+ const hideIfOutside=()=>setTimeout(()=>{if(document.activeElement!==input&&!list.contains(document.activeElement))hideSuggestions(which)},180);
+ input.addEventListener('blur',hideIfOutside);list.addEventListener('focusout',hideIfOutside);
 });
 $('swap-address').onclick=()=>{const a=state.liveStart,b=state.liveEnd;state.liveStart=b;state.liveEnd=a;
  const av=$('start-search').value;$('start-search').value=$('end-search').value;$('end-search').value=av;
@@ -128,7 +137,7 @@ $('swap-address').onclick=()=>{const a=state.liveStart,b=state.liveEnd;state.liv
 $('gps-start').onclick=()=>{if(!navigator.geolocation)return $('address-status').textContent='GPS unavailable in this browser.';
  $('address-status').textContent='Requesting permission for your current position…';
  navigator.geolocation.getCurrentPosition(p=>{const point={name:'Current location (GPS)',lat:p.coords.latitude,lng:p.coords.longitude};
- state.liveStart=point;state.liveRoute=null;$('start-search').value='Current location (GPS ±'+Math.round(p.coords.accuracy||0)+' m)';
+ state.liveStart=point;state.liveRoute=null;refreshJourneyRoute();$('start-search').value='Current location (GPS ±'+Math.round(p.coords.accuracy||0)+' m)';
  $('address-status').textContent='GPS start set. Accuracy ±'+Math.round(p.coords.accuracy||0)+' m. GPS may not match an accessible entrance.';renderRoutes();drawMap();
  },()=>{$('address-status').textContent='Current location unavailable or permission denied.'},{enableHighAccuracy:true,timeout:12000})};
 let watchId=null,gpsMarker=null,lastGPS=null;
@@ -214,7 +223,14 @@ $('read-summary').onclick=()=>{if(!window.speechSynthesis)return toast('Speech o
 renderAccess();
 $('save').onclick=()=>{if(state.mode==='demo'&&$('start').value===$('end').value)return toast('Choose different places');const [a,b]=placePair();if(!a||!b)return toast('Select both locations');state.saved.unshift({id:Date.now(),from:a.name,to:b.name,mode:state.mode,preferences:{...state.preferences},created:new Date().toLocaleDateString('en-SG')});state.saved=state.saved.slice(0,40);save();toast('Planning scenario saved in this browser')};
 function renderSaved(){$('saved-list').innerHTML=state.saved.length?state.saved.map(x=>`<div class="report"><div><strong>${esc(x.from)} → ${esc(x.to)}</strong><p>${esc(x.mode)} planning scenario · ${esc(x.created)} · Not a verified route</p></div><button class="outline" data-remove="${x.id}">Remove</button></div>`).join(''):'<div class="notice">No saved journeys yet. Plan a scenario and press Save.</div>';qs('[data-remove]').forEach(b=>b.onclick=()=>{state.saved=state.saved.filter(x=>String(x.id)!==b.dataset.remove);save();renderSaved()})}
-function openModal(){$('modal').classList.remove('hidden');$('where').focus()}function closeModal(){$('modal').classList.add('hidden')}
+let lastFocus=null;
+function openModal(){lastFocus=document.activeElement;$('modal').classList.remove('hidden');$('where').focus()}
+function closeModal(){if($('modal').classList.contains('hidden'))return;$('modal').classList.add('hidden');lastFocus?.focus()}
+$('modal').addEventListener('keydown',e=>{if(e.key!=='Tab')return;
+ const f=[...$('modal').querySelectorAll('button,input,select,textarea')].filter(x=>!x.disabled);if(!f.length)return;
+ const first=f[0],last=f[f.length-1];
+ if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+ else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}});
 $('report').onclick=openModal;$('new-report').onclick=openModal;$('close-modal').onclick=closeModal;$('cancel-report').onclick=closeModal;$('modal').onclick=e=>{if(e.target===$('modal'))closeModal()};document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 $('report-form').onsubmit=async e=>{e.preventDefault();const payload={location:$('where').value.trim(),category:$('category').value,description:$('description').value.trim()};
  try{const r=await fetch('/api/reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.error||'Submission failed');$('report-form').reset();closeModal();changePage('reports');toast('Report submitted as unverified')}catch(err){toast(err.message)}};
