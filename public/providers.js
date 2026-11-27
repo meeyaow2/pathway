@@ -77,6 +77,16 @@ function search(query) {
  return cached('s:' + q.toLowerCase(), 10 * 60e3, async () => ({provider: 'photon', results: normalisePhoton(await getJSON(CONFIG.photon + '?' + params, 'Address search'))}));
 }
 
+/* Reverse geocoding for "Where am I?" — only on explicit request; the position is not stored. */
+async function reverse(lat, lng) {
+ if (!inSG({lat, lng})) throw new ProviderError('That position is outside Singapore.', 'input');
+ const params = new URLSearchParams({lat: lat.toFixed(5), lon: lng.toFixed(5), lang: 'en', limit: '1'});
+ const data = await getJSON(CONFIG.photon.replace(/api\/$/, 'reverse') + '?' + params, 'Place lookup', 12000);
+ const p = (data.features && data.features[0] && data.features[0].properties) || {};
+ const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+ return [p.name, street, p.district || p.locality].filter((x, i, a) => x && a.indexOf(x) === i).join(', ');
+}
+
 /* ---------------- routing */
 function decodePolyline(str, precision = 5) {
  let index = 0, lat = 0, lng = 0; const points = [], factor = Math.pow(10, precision);
@@ -176,7 +186,7 @@ class LocalReportStore {
 
 function inSG(p) { return !!p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && p.lat >= SG.latMin && p.lat <= SG.latMax && p.lng >= SG.lngMin && p.lng <= SG.lngMax; }
 
-const api = {CONFIG, SG, PROFILES, ProviderError, search, route, compareRoutes, decodePolyline, normalisePhoton, normaliseValhalla, LocalReportStore, inSG,
+const api = {CONFIG, SG, PROFILES, ProviderError, search, reverse, route, compareRoutes, decodePolyline, normalisePhoton, normaliseValhalla, LocalReportStore, inSG,
  attribution: 'Search: Photon by komoot · Routing: Valhalla (FOSSGIS) · Data © OpenStreetMap contributors'};
 root.PathwayProviders = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

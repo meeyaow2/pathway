@@ -1,5 +1,9 @@
 name: Test and deploy to GitHub Pages
 
+# Pull requests: tests only (never published).
+# Pushes to main: test -> build (upload public/) -> deploy, as separate jobs like GitHub's Pages template.
+# Uploading and deploying in separate jobs avoids the "No artifacts named github-pages were found" race
+# seen when deploy-pages queried the artifact a fraction of a second after uploading it in the same job.
 on:
   push:
     branches: [main]
@@ -8,39 +12,54 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
+# One run per branch; superseded PR runs are cancelled, production runs are never cancelled mid-way.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Unit tests (no network)
-        run: node --test tests/providers.test.js
+        run: node --test tests/*.test.js
       - name: Syntax check
         run: for f in public/*.js; do node --check "$f"; done
+      - name: The published folder contains the app (not the README)
+        run: |
+          test -f public/index.html && test -f public/app.js && test -f public/sw.js
+          grep -q 'id="start-search"' public/index.html
 
-  deploy:
-    # Only main is published; pull requests are tested but never deployed.
+  build:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stamp the service-worker build ID (new deploy = fresh app cache)
+        run: sed -i "s/__BUILD__/${GITHUB_SHA::8}/" public/sw.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages-production
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: public
       - id: deployment
         uses: actions/deploy-pages@v4

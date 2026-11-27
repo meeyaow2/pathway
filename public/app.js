@@ -11,18 +11,15 @@ const token = name => getComputedStyle(document.documentElement).getPropertyValu
 
 /* ------------------------------------------------------------ preferences */
 // status: 'applied' changes routing/ranking, 'display' changes presentation, 'data' needs datasets Pathway doesn't have yet.
+// Grouped by what each preference actually does, so the status is stated once per group (not under every chip).
 const PREF_GROUPS = [
- {title: 'Physical access', items: [
-  ['stepfree', 'Wheelchair-profile routing', 'applied'], ['avoidstairs', 'Avoid stairs', 'applied'], ['lifts', 'Prefer lifts', 'applied'],
-  ['ramps', 'Accessible ramps', 'data'], ['crossings', 'Accessible crossings', 'data'], ['slopes', 'Gentle slopes and kerbs', 'data']]},
- {title: 'Comfort', items: [
-  ['shorter', 'Shorter walking distance', 'applied'], ['simpler', 'Fewer turns', 'applied'],
-  ['shelter', 'Sheltered walkways', 'data'], ['rest', 'Rest stops and seating', 'data'], ['weather', 'Less weather exposure', 'data']]},
- {title: 'Seeing, hearing and understanding', items: [
-  ['spoken', 'Spoken updates', 'display'], ['simple', 'Simplified instructions', 'display'], ['large', 'Larger text', 'display'],
-  ['contrast', 'High contrast', 'display'], ['vibrate', 'Vibration alerts', 'display'], ['visual', 'Visual-only alerts', 'display']]},
+ {id: 'route', status: 'applied', key: 'Changes routes', title: 'Route suggestions', desc: 'These change which route Pathway suggests.', items: [
+  ['stepfree', 'Wheelchair-profile routing'], ['avoidstairs', 'Avoid stairs'], ['lifts', 'Prefer lifts'], ['shorter', 'Shorter distance'], ['simpler', 'Fewer turns']]},
+ {id: 'display', status: 'display', key: 'Changes display', title: 'Display and alerts', desc: 'These change how information is shown or announced.', collapsed: true, items: [
+  ['spoken', 'Spoken updates'], ['simple', 'Simpler instructions'], ['large', 'Larger text'], ['contrast', 'High contrast'], ['vibrate', 'Vibration'], ['visual', 'Visual-only alerts']]},
+ {id: 'data', status: 'data', key: 'Not applied yet', title: 'Not available yet', desc: 'Pathway has no reliable Singapore data for these, so they can’t change routes yet. You can still mark them so the app reminds you they are unknown.', collapsed: true, items: [
+  ['ramps', 'Ramps'], ['crossings', 'Accessible crossings'], ['slopes', 'Gentle slopes and kerbs'], ['shelter', 'Sheltered walkways'], ['rest', 'Rest stops and seating'], ['weather', 'Less weather exposure']]},
 ];
-const STATUS_TEXT = {applied: 'Changes routes', display: 'Changes display', data: 'Data needed, not applied yet'};
 const PRESETS = {
  wheelchair: ['stepfree', 'avoidstairs', 'lifts'], mobility: ['avoidstairs', 'lifts', 'shorter'], blind: ['spoken', 'simple'],
  lowvision: ['large', 'contrast'], hearing: ['visual', 'vibrate'], elderly: ['avoidstairs', 'lifts', 'shorter', 'large'],
@@ -34,13 +31,14 @@ const SAMPLES = {
 };
 
 const state = {
- prefs: {stepfree: true, lifts: true}, access: {}, saved: [], reports: [], mapStyle: 'liberty', showReports: true,
+ prefs: {stepfree: true, lifts: true}, access: {}, saved: [], reports: [], mapStyle: 'onemap', mapStyleChosen: false, showReports: true, audioMode: false,
  start: null, end: null, routes: [], selected: 0, planning: false, status: null,
 };
 try {
  const v3 = JSON.parse(localStorage.getItem('pathway-v3') || 'null');
- if (v3) Object.assign(state, {prefs: v3.prefs || state.prefs, access: v3.access || {}, saved: v3.saved || [], mapStyle: v3.mapStyle || 'liberty', showReports: v3.showReports !== false});
- else {
+ // OneMap is the default (fastest in Singapore); an earlier saved style is only kept if the person picked it themselves.
+ if (v3) Object.assign(state, {prefs: v3.prefs || state.prefs, access: v3.access || {}, saved: v3.saved || [], mapStyle: v3.mapStyleChosen && v3.mapStyle ? v3.mapStyle : 'onemap', mapStyleChosen: !!v3.mapStyleChosen, showReports: v3.showReports !== false, audioMode: !!v3.audioMode});
+ else if (localStorage.getItem('pathway-v2')) {
   const v2 = JSON.parse(localStorage.getItem('pathway-v2') || '{}'); // migrate earlier version
   const p = v2.preferences || {}, a = v2.access || {};
   state.saved = v2.saved || [];
@@ -48,17 +46,22 @@ try {
   state.access = {blind: !!a.blind, lowvision: !!a.lowvision, mobility: !!a.mobility, hearing: !!a.hearing, cognitive: !!a.cognitive};
  }
 } catch { /* storage unavailable: defaults */ }
-const save = () => { try { localStorage.setItem('pathway-v3', JSON.stringify({prefs: state.prefs, access: state.access, saved: state.saved, mapStyle: state.mapStyle, showReports: state.showReports})); } catch {} };
+const save = () => { try { localStorage.setItem('pathway-v3', JSON.stringify({prefs: state.prefs, access: state.access, saved: state.saved, mapStyle: state.mapStyle, mapStyleChosen: state.mapStyleChosen, showReports: state.showReports, audioMode: state.audioMode})); } catch {} };
 
 /* ------------------------------------------------------------ feedback */
 let toastTimer;
-function toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 4200); }
+function toast(text, silent = false) { const t = $('toast'); t.setAttribute('aria-live', silent ? 'off' : 'polite'); t.textContent = text; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 4200); }
 function alertSR(text) { const a = $('sr-alert'); a.textContent = ''; setTimeout(() => { a.textContent = text; }, 50); }
-function speak(text, force = false) {
- if (!(force || state.prefs.spoken)) return;
- if (!('speechSynthesis' in window)) { if (force) toast('Speech isn’t supported in this browser.'); return; }
- speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'en-SG'; u.rate = .95; speechSynthesis.speak(u);
-}
+const A = window.PathwayAudio;
+const guide = {active: false, paused: false, tracker: null, wake: null, resumeOnVisible: false, waitingAnnounced: false};
+const autoSpeak = () => state.prefs.spoken ?? state.audioMode; // audio mode speaks by default unless switched off
+const speaker = new A.Speaker({polite: $('guide-live'), assertive: $('sr-alert'), synth: 'speechSynthesis' in window ? window.speechSynthesis : null,
+ settings: () => ({auto: !!autoSpeak(), target: state.prefs.voiceTarget || 'voice', rate: Number(state.prefs.rate || 1), paused: guide.paused})});
+// notify: speak (if automatic speech is on) or, otherwise, hand the text to screen readers — never both.
+function notify(text, opts = {}) { const r = speaker.say(text, opts); if (r === 'silent') speaker.announce(text, opts.priority === 'high'); return r; }
+function speak(text, force = false) { return speaker.say(text, {force, key: force ? 'f' + Date.now() : text}); }
+// Pathway's own voice only (screen-reader users already hear role=status updates for these).
+function voiceOnly(text) { if (speaker.channel === 'voice' && autoSpeak() && !guide.paused) speaker.say(text, {key: text, gap: 3000}); }
 function buzz(pattern) { if (state.prefs.vibrate && navigator.vibrate) try { navigator.vibrate(pattern); } catch {} }
 
 const P = window.PathwayProviders;
@@ -75,7 +78,7 @@ const STYLES = {
  onemap: {version: 8, sources: {onemap: {type: 'raster', tiles: ['https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png'], tileSize: 256, minzoom: 11, maxzoom: 19, bounds: [103.596, 1.1443, 104.1, 1.4835], attribution: ONEMAP_ATTR}},
   layers: [{id: 'bg', type: 'background', paint: {'background-color': '#ECE8F2'}}, {id: 'onemap', type: 'raster', source: 'onemap'}]},
 };
-let map = null, markerA = null, markerB = null, gpsMarker = null;
+let map = null, markerA = null, markerB = null, gpsMarker = null, mapInits = 0;
 let mapLoadTimer = null;
 let mapHasRendered = false;
 function mapLoading(message, actionable = false) {
@@ -94,10 +97,31 @@ function mapReady() {
 function mapTimeout() {
  if (!mapHasRendered) mapLoading('The map is taking longer than expected. You can retry or use Singapore OneMap. Search and route information remain available.', true);
 }
+/* The map library (~210 KB compressed) is loaded lazily so search and planning never wait for it. */
+const MAPLIBRE = 'vendor/maplibre-gl-4.7.1/maplibre-gl';
+let mapLibPromise = null, mapRequested = false;
+function loadMapLibrary() {
+ if (window.maplibregl) return Promise.resolve();
+ if (mapLibPromise) return mapLibPromise;
+ mapLibPromise = new Promise((resolve, reject) => {
+  const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = MAPLIBRE + '.css'; document.head.appendChild(css);
+  const js = document.createElement('script'); js.src = MAPLIBRE + '.js'; js.async = true;
+  js.onload = () => window.maplibregl ? resolve() : reject(Error('Map library missing'));
+  js.onerror = () => { mapLibPromise = null; js.remove(); reject(Error('Map library failed to download')); };
+  document.head.appendChild(js);
+ });
+ return mapLibPromise;
+}
+async function ensureMap() {
+ if (map || mapRequested) return; mapRequested = true;
+ mapLoading('Loading map… You can search and plan routes now.');
+ try { await loadMapLibrary(); setupMap(); }
+ catch { mapRequested = false; mapLoading('The map couldn’t download. Search, routes and directions still work.', true); }
+}
 $('map-retry').addEventListener('click', () => {
- if (!map) return setupMap();
+ if (!map) return ensureMap();
  mapHasRendered = false;mapLoading('Retrying map tiles…');
- map.setStyle(STYLES[state.mapStyle]);
+ map.setStyle(STYLES[state.mapStyle], {diff: false});
  clearTimeout(mapLoadTimer);mapLoadTimer = setTimeout(mapTimeout, 9000);
 });
 $('map-try-onemap').addEventListener('click', () => { selectStyle('onemap'); });
@@ -111,17 +135,17 @@ function setupMap() {
  clearTimeout(mapLoadTimer);
  mapLoadTimer = setTimeout(mapTimeout, 9000);
  try {
-  const mobile = matchMedia('(max-width: 700px)').matches;
+  const mobile = matchMedia('(max-width: 700px)').matches; mapInits++;
   map = new maplibregl.Map({container: 'map', style: STYLES[state.mapStyle] || STYLES.liberty, center: [103.8318, 1.3046], zoom: mobile ? 12.5 : 13.5,
    minZoom: 10, maxZoom: 19, maxBounds: [[103.3, 1.0], [104.5, 1.7]], attributionControl: {compact: true}, dragRotate: false, pitchWithRotate: false,
-   pixelRatio: Math.min(window.devicePixelRatio || 1, mobile ? 1.25 : 1.75),
+   pixelRatio: Math.min(window.devicePixelRatio || 1, 2), // crisp route lines without 3x canvas cost
    fadeDuration: 0, renderWorldCopies: false, maxTileCacheSize: mobile ? 35 : 60});
  } catch (e) { clearTimeout(mapLoadTimer); $('map').innerHTML = '<div class="map-fallback"><p>This browser can’t display the interactive map (WebGL unavailable). Directions are still listed as text.</p></div>'; mapLoading('Map rendering is unavailable in this browser. Text directions remain available.', false); map = null; return; }
  map.touchZoomRotate.disableRotation();
  if (matchMedia('(min-width: 600px)').matches) map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'top-right');
  map.addControl(new maplibregl.ScaleControl({unit: 'metric'}), 'bottom-left');
  map.on('style.load', addOverlays);
- map.on('load', mapReady);
+ map.on('load', () => { mapReady(); drawMarkers(); if (lastGPS) gpsUpdate({coords: {latitude: lastGPS.lat, longitude: lastGPS.lng, accuracy: lastGPS.accuracy}}); fitView(); });
  map.on('idle', () => { if (map && map.isStyleLoaded()) mapReady(); });
  map.on('error', e => { if (e && e.error) console.warn('Map:', e.error.message); });
  map.getCanvas().setAttribute('aria-label', 'Interactive map. Use arrow keys to pan and plus or minus to zoom.');
@@ -129,7 +153,7 @@ function setupMap() {
   const f = e.features && e.features[0]; if (!f) return;
   const el = document.createElement('div');
   const h = document.createElement('strong'); h.textContent = f.properties.category;
-  const flag = document.createElement('p'); flag.textContent = 'Local demo report (this device only)'; flag.style.cssText = 'margin:4px 0;color:#6b3a00;font-weight:700';
+  const flag = document.createElement('p'); flag.textContent = 'Local demo report (this device only)'; flag.className = 'popup-flag';
   const d = document.createElement('p'); d.textContent = f.properties.location + ' — ' + f.properties.description; d.style.margin = '0';
   el.append(h, flag, d);
   new maplibregl.Popup({offset: 12}).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
@@ -204,9 +228,9 @@ function fitView() {
 }
 function selectStyle(style) {
  if (!STYLES[style]) return;
- state.mapStyle = style; save();
+ state.mapStyle = style; state.mapStyleChosen = true; save();
  ['liberty', 'positron', 'onemap'].forEach(s => $('provider-' + s).setAttribute('aria-pressed', String(s === style)));
- if (map) { mapHasRendered = false; mapLoading('Loading '+(style === 'onemap' ? 'OneMap' : 'map')+' tiles…'); clearTimeout(mapLoadTimer);mapLoadTimer=setTimeout(mapTimeout,9000);map.setStyle(STYLES[style]); }
+ if (map) { mapHasRendered = false; mapLoading('Loading '+(style === 'onemap' ? 'OneMap' : 'map')+' tiles…'); clearTimeout(mapLoadTimer);mapLoadTimer=setTimeout(mapTimeout,9000);map.setStyle(STYLES[style], {diff: false}); } // full reload fires style.load, which re-adds the route and report layers
 }
 
 /* ------------------------------------------------------------ bottom sheet + pages */
@@ -262,13 +286,14 @@ function setupCombo(which) {
  const choose = r => { close(); selectPlace(which, r); };
  const run = async () => {
   const q = input.value.trim(); if (q.length < 3) { close(); return; }
-  const seq = ++c.seq; $('address-status').textContent = 'Searching…';
+  const seq = ++c.seq; input.setAttribute('aria-busy', 'true');
   try {
    const data = await P.search(q);
    if (seq !== c.seq) return;
    c.items = data.results || []; c.active = -1; render();
-   $('address-status').textContent = c.items.length ? plural(c.items.length, 'suggestion', 'suggestions') + '. Use the up and down arrows or tap one to choose.' : 'No matches found.';
+   $('address-status').textContent = c.items.length ? plural(c.items.length, 'suggestion', 'suggestions') + ' below the field. Use the down arrow key, or swipe right with a screen reader, to review them.' : 'No matches found. Try a six-digit postal code or a building name.';
   } catch (e) { if (seq !== c.seq) return; close(); $('address-status').textContent = 'Address search unavailable: ' + e.message; }
+  finally { if (seq === c.seq) input.removeAttribute('aria-busy'); }
  };
  c.run = run;
  input.addEventListener('input', () => {
@@ -295,6 +320,8 @@ function selectPlace(which, r, {plan = true} = {}) {
  state[which] = p; $(which + '-search').value = p.name;
  clearRoutes(); drawMarkers();
  $('address-status').textContent = (which === 'start' ? 'Start' : 'Destination') + ': ' + p.name + (p.address ? ', ' + p.address : '') + '.';
+ voiceOnly($('address-status').textContent);
+ updateSummary();
  if (state.start && state.end && plan) planRoutes();
  else { fitView(); if (!state.end) $('end-search').focus(); }
 }
@@ -362,11 +389,11 @@ async function planRoutes() {
   app.classList.add('has-route');
   const r = state.routes[state.selected];
   const msg = plural(state.routes.length, 'route', 'routes') + ' found. Suggested: ' + r.label + ', ' + fmtTime(r.duration_s) + ', ' + fmtDist(r.distance_m) + '. Accessibility not verified.';
-  alertSR(msg); speak(msg); buzz(60);
+  notify(A.compareSummary(state.routes, state.selected, recommendIndex(state.routes))); buzz(60);
   if (!matchMedia('(min-width: 600px)').matches) setSheet('peek');
  } catch (e) {
   state.routes = [illustrative()]; state.selected = 0;
-  toast('Routing unavailable: ' + e.message); alertSR('Routing unavailable. ' + e.message);
+  toast('Routing unavailable: ' + e.message, true); notify('Routing unavailable. ' + e.message + ' A straight-line illustration is shown instead; it is not a walking route.', {priority: 'high', key: 'route-fail'});
  } finally {
   state.planning = false; btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = 'Get walking directions';
   $('routes').removeAttribute('aria-busy');
@@ -394,20 +421,30 @@ function renderRoutes() {
  box.innerHTML = state.routes.map((r, i) => {
   const c = r.counts, meta = r.illustrative ? ['Straight line ' + fmtDist(r.distance_m)] :
    [fmtDist(r.distance_m), plural(c.stairs, 'stair section', 'stair sections'), plural(c.elevator, 'lift', 'lifts'), plural(c.crossing, 'crossing', 'crossings')];
-  const tag = state.routes.length > 1 && i === rec ? '<span class="tag">' + (physical ? 'Best match for your needs' : 'Fastest') + '</span>' : '';
+  const tag = state.routes.length > 1 && i === rec ? '<span class="tag">' + (physical ? 'Best match' : 'Fastest') + '</span>' : '';
   const warn = (r.warnings || []).map(w => '<div class="warn">' + esc(w) + '</div>').join('');
-  return '<button type="button" class="route-card" data-route="' + i + '" aria-pressed="' + (i === state.selected) + '">' +
+  const name = A.routeSummary(r, i) + (tag ? ' ' + (physical ? 'Best match for your needs.' : 'Fastest.') : '') + ' ' + (r.warnings || []).join(' ') + (r.illustrative ? '' : ' Not verified as accessible.');
+  return '<button type="button" class="route-card" data-route="' + i + '" aria-pressed="' + (i === state.selected) + '" aria-label="' + esc(name) + '">' +
    '<span class="top"><span class="label">' + esc(r.label) + '<span class="selected-mark" aria-hidden="true">✓ Selected</span></span><span class="time">' + (r.illustrative ? '—' : esc(fmtTime(r.duration_s))) + '</span></span>' +
    '<span class="meta">' + meta.map(m => '<span>' + esc(m) + '</span>').join('') + '</span>' +
-   (r.illustrative ? '' : '<span class="meta"><span>' + esc(r.note) + ' Stairs and lifts counted from map data.</span></span>') + tag + warn + '</button>';
+   (r.illustrative ? '' : '<span class="meta note"><span>' + esc(r.note) + ' Stairs and lifts counted from map data.</span></span>') + tag + warn + '</button>';
  }).join('');
  qs('[data-route]', box).forEach(b => b.addEventListener('click', () => {
   state.selected = Number(b.dataset.route); refreshJourneyRoute(); renderRoutes(); drawRoutes();
-  const r = state.routes[state.selected]; alertSR('Selected ' + r.label + ', ' + fmtTime(r.duration_s) + '.');
+  const r = state.routes[state.selected]; notify('Selected. ' + A.routeSummary(r), {key: 'sel' + Date.now()});
  }));
  renderDetails();
 }
+function renderCta() {
+ const ready = state.routes.length && !state.routes[state.selected]?.illustrative;
+ $('plan').classList.toggle('hidden', !!ready); $('cta-start').classList.toggle('hidden', !ready);
+ $('cta-start').disabled = guide.active;
+ // Nothing to plan until both places are chosen; keeps the collapsed sheet clean.
+ $('plan').parentElement.classList.toggle('hidden', !ready && !(state.start && state.end));
+ $('safety').classList.toggle('hidden', !state.routes.length); // the verification note belongs with a route
+}
 function renderDetails() {
+ renderCta();
  const r = state.routes[state.selected];
  const simple = !!state.prefs.simple; $('steps').classList.toggle('simple', simple); $('needs').closest('.page').classList.toggle('simple', simple);
  if (!r) { $('details-title').textContent = 'Walking directions'; $('route-detail').textContent = 'Choose a start and destination to see step-by-step directions.'; $('steps').innerHTML = ''; return; }
@@ -421,95 +458,143 @@ function renderDetails() {
 $('read-summary').addEventListener('click', () => {
  const r = state.routes[state.selected];
  if (!r) return speak('No route loaded yet. Choose a start and a destination.', true);
- speak(r.label + '. ' + fmtTime(r.duration_s) + ', ' + fmtDist(r.distance_m) + '. Accessibility is not verified. ' + r.steps.map((s, i) => 'Step ' + (i + 1) + '. ' + (state.prefs.simple ? s.short : s.instruction)).join(' '), true);
+ speak(A.routeSummary(r) + ' Accessibility is not verified. ' + r.steps.map((s, i) => 'Step ' + (i + 1) + '. ' + A.stepText(s, !!state.prefs.simple)).join(' '), true);
 });
 
-/* ------------------------------------------------------------ journey progress (GPS) */
-let watchId = null, lastGPS = null, journey = null, lastBadge = '', currentStep = -1;
-const EARTH = 6371000;
-function metres(a, b) { const r = Math.PI / 180, dp = (b[0] - a[0]) * r, dl = (b[1] - a[1]) * r; const v = Math.sin(dp / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dl / 2) ** 2; return 2 * EARTH * Math.atan2(Math.sqrt(v), Math.sqrt(Math.max(0, 1 - v))); }
-function routeProjection(pos, pts) {
- const cos = Math.cos(pos[0] * Math.PI / 180), toXY = p => [(p[1] - pos[1]) * Math.PI / 180 * EARTH * cos, (p[0] - pos[0]) * Math.PI / 180 * EARTH];
- let total = 0, best = {distance: Infinity, along: 0, index: 0};
- for (let i = 1; i < pts.length; i++) {
-  const a = toXY(pts[i - 1]), b = toXY(pts[i]), vx = b[0] - a[0], vy = b[1] - a[1], len = Math.hypot(vx, vy);
-  if (len < .01) continue;
-  const t = Math.max(0, Math.min(1, -(a[0] * vx + a[1] * vy) / (len * len))), d = Math.hypot(a[0] + t * vx, a[1] + t * vy);
-  if (d < best.distance) best = {distance: d, along: total + t * len, index: i - 1};
-  total += len;
- }
- return best;
-}
+/* ------------------------------------------------------------ journey guidance (GPS + audio) */
+let watchId = null, lastGPS = null;
 function refreshJourneyRoute() {
- journey = null; currentStep = -1;
  const r = state.routes[state.selected];
- if (r && !r.illustrative && r.geometry.length > 1) {
-  let len = 0; for (let i = 1; i < r.geometry.length; i++) len += metres(r.geometry[i - 1], r.geometry[i]);
-  journey = {points: r.geometry, length: len, steps: r.steps};
- }
- updateJourney();
+ guide.tracker = r && !r.illustrative && r.geometry.length > 1 ? new A.GuidanceTracker(r, {simple: !!state.prefs.simple}) : null;
+ updateSummary(); updateJourney();
 }
-function setStep(i) {
- if (i === currentStep) return; currentStep = i;
- qs('#steps li').forEach(li => li.classList.toggle('current', Number(li.dataset.step) === i));
- const s = journey?.steps[i]; if (s) { speak('Next: ' + (state.prefs.simple ? s.short : s.instruction)); buzz(40); }
+function updateSummary() {
+ const r = state.routes[state.selected];
+ $('sum-from').textContent = state.start ? state.start.name : 'Not chosen';
+ $('sum-to').textContent = state.end ? state.end.name : 'Not chosen';
+ $('sum-route').textContent = r ? (r.illustrative ? 'No walking route available' : r.label + ', about ' + fmtTime(r.duration_s) + ', ' + fmtDist(r.distance_m)) : 'None yet';
 }
+function highlightStep(i) { qs('#steps li').forEach(li => li.classList.toggle('current', Number(li.dataset.step) === i)); }
 function updateJourney() {
- const badge = $('journey-badge');
+ const badge = $('journey-badge'), t = guide.tracker;
  const set = (label, text, pct = 0, tone = '') => {
   badge.textContent = label; badge.className = 'flag ' + tone; $('journey-message').textContent = text;
   $('journey-progress').setAttribute('aria-valuenow', String(Math.round(pct))); $('journey-fill').style.width = pct + '%';
-  if (label !== lastBadge && lastBadge && watchId !== null) {
-   if (tone === 'alert') { alertSR(text); buzz([120, 80, 120]); }
-   speak(label.toLowerCase() + '. ' + text);
-  }
-  lastBadge = label;
  };
+ $('guide-start').disabled = guide.active; $('guide-stop').disabled = !guide.active; $('guide-pause').disabled = !guide.active; $('cta-start').disabled = guide.active;
  $('journey-recalculate').disabled = !(lastGPS && state.end);
- if (!journey) { $('journey-distance').textContent = 'Remaining: —'; $('journey-accuracy').textContent = 'GPS accuracy: —'; return set('NOT NAVIGATING', 'Load a walking route, then choose Follow to see approximate progress.'); }
- if (!lastGPS) { $('journey-distance').textContent = 'Remaining: ' + fmtDist(journey.length); $('journey-accuracy').textContent = 'GPS accuracy: —'; return set('GPS OFF', 'Choose Follow (the arrow button on the map) to see approximate progress along this route.'); }
- const acc = lastGPS.accuracy || Infinity, m = routeProjection([lastGPS.lat, lastGPS.lng], journey.points);
- const remaining = Math.max(0, journey.length - m.along), pct = journey.length ? Math.max(0, Math.min(100, 100 * m.along / journey.length)) : 0;
- $('journey-distance').textContent = 'Remaining: about ' + fmtDist(remaining);
- $('journey-accuracy').textContent = 'GPS accuracy: ' + (Number.isFinite(acc) ? '±' + Math.round(acc) + ' m' : 'unknown');
- if (journey.steps.length && journey.steps[0].shape_index !== null) {
-  let idx = 0; journey.steps.forEach((s, i) => { if (s.shape_index <= m.index) idx = i; }); if (watchId !== null) setStep(idx);
+ if (!t) {
+  $('latest-instruction').textContent = state.routes[0]?.illustrative ? 'No walking route is available right now. Try again in a moment.' : 'Choose a start and destination to hear the route.';
+  $('journey-distance').textContent = 'Remaining: —'; $('journey-accuracy').textContent = 'GPS accuracy: —';
+  return set('NOT STARTED', 'Load a walking route, then choose Start guidance.');
  }
- if (acc > 50) return set('LOW ACCURACY', 'GPS accuracy is too low to estimate where you are on the route.', pct);
- if (m.distance > Math.max(35, acc * 2)) return set('POSSIBLY OFF ROUTE', 'You seem to be about ' + Math.round(m.distance) + ' m from the route. Check your surroundings, or choose Reroute from here.', pct, 'alert');
- if (remaining <= 25) return set('NEAR DESTINATION', 'You may be near the destination. Confirm the accessible entrance yourself.', pct, 'ok');
- set('ON ROUTE', 'Approximate position along the route. This isn’t safety-verified navigation.', pct, 'ok');
+ if (!lastGPS || (!guide.active && watchId === null && !lastGPS)) {
+  $('latest-instruction').textContent = 'First: ' + t.firstInstruction();
+  $('journey-distance').textContent = 'Remaining: ' + fmtDist(t.length); $('journey-accuracy').textContent = 'GPS accuracy: —';
+  return set(guide.active ? 'WAITING FOR GPS' : 'NOT STARTED', guide.active ? 'Waiting for your position. This can take a little while outdoors.' : 'Choose Start guidance to follow your approximate progress with GPS.');
+ }
+ const v = t.evaluate(lastGPS);
+ $('latest-instruction').textContent = v.latest;
+ $('journey-distance').textContent = 'Remaining: about ' + fmtDist(v.remaining);
+ $('journey-accuracy').textContent = 'GPS accuracy: ±' + Math.round(v.accuracy) + ' m';
+ set(v.badge, v.message, v.pct, v.tone);
+ if (!guide.active) return;
+ highlightStep(v.stepIdx);
+ for (const e of v.events) { notify(e.text, {priority: e.priority || 'normal', key: e.key}); if (e.vibrate) buzz(e.vibrate); }
 }
 function gpsUpdate(p) {
  const lat = p.coords.latitude, lng = p.coords.longitude; if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
- lastGPS = {lat, lng, accuracy: Math.round(p.coords.accuracy || 0)};
+ lastGPS = {lat, lng, accuracy: Math.round(p.coords.accuracy || 0)}; guide.waitingAnnounced = false;
  if (map) {
   if (!gpsMarker) { const el = document.createElement('div'); el.className = 'gps-dot'; el.setAttribute('role', 'img'); el.setAttribute('aria-label', 'Your approximate location'); gpsMarker = new maplibregl.Marker({element: el}); }
   gpsMarker.setLngLat([lng, lat]).addTo(map);
-  if (watchId !== null) map.easeTo({center: [lng, lat], duration: reducedMotion ? 0 : 400});
+  if (guide.active) map.easeTo({center: [lng, lat], duration: reducedMotion ? 0 : 400});
  }
- $('gps-status').textContent = 'GPS on · accuracy ±' + lastGPS.accuracy + ' m. Location is never stored.';
+ $('gps-status').textContent = (guide.active ? 'GPS on' : 'Last GPS fix') + ' · accuracy ±' + lastGPS.accuracy + ' m. Location is never stored or sent anywhere.';
  updateJourney();
 }
-function stopGPS(message) {
- if (watchId !== null) navigator.geolocation.clearWatch(watchId); watchId = null; lastBadge = ''; setStep(-1);
- const f = $('follow-gps'); f.setAttribute('aria-pressed', 'false'); f.setAttribute('aria-label', 'Follow my location along the route');
- $('gps-status').textContent = message || 'GPS is off. Location is never stored.'; updateJourney();
+async function keepAwake(on) {
+ try {
+  if (on && state.prefs.wake !== false && 'wakeLock' in navigator) guide.wake = await navigator.wakeLock.request('screen');
+  else if (!on && guide.wake) { await guide.wake.release(); guide.wake = null; }
+ } catch { guide.wake = null; }
 }
-$('follow-gps').addEventListener('click', () => {
- if (watchId !== null) return stopGPS();
- if (!navigator.geolocation || !window.isSecureContext) { $('gps-status').textContent = gpsErrorText(null); toast(gpsErrorText(null)); return; }
+function watchGPS() {
+ watchId = navigator.geolocation.watchPosition(gpsUpdate, err => {
+  const msg = gpsErrorText(err);
+  $('gps-status').textContent = msg;
+  // Only a refused permission ends guidance; "unavailable" and "timeout" are often temporary (indoors, under cover).
+  if (err && err.code !== 1) { if (!guide.waitingAnnounced) { guide.waitingAnnounced = true; notify('GPS is unavailable right now. Pathway will keep trying. ' + msg, {key: 'gps-wait', gap: 60000}); } return; }
+  stopGuidance('Guidance stopped. ' + msg);
+ }, {enableHighAccuracy: true, maximumAge: 3000, timeout: 20000});
+}
+function setFollowButton(on) { const f = $('follow-gps'); f.setAttribute('aria-pressed', String(on)); f.setAttribute('aria-label', on ? 'Stop guidance' : 'Start guidance and follow my location'); }
+function startGuidance() {
+ if (!guide.tracker) { notify('Choose a start and a destination first, then start guidance.', {force: true}); (state.start ? $('end-search') : $('start-search')).focus(); return; }
+ if (!navigator.geolocation || !window.isSecureContext) { const m = gpsErrorText(null); $('gps-status').textContent = m; notify(m, {force: true, priority: 'high'}); return; }
+ const r = state.routes[state.selected];
+ guide.active = true; guide.paused = false; guide.waitingAnnounced = false; guide.tracker.reset(); setPause(false);
+ notify('Guidance started. ' + A.routeSummary(r) + ' First: ' + guide.tracker.firstInstruction() +
+  ' Pathway uses approximate GPS and can’t detect crossings, obstacles or entrances.', {key: 'start' + Date.now()});
+ watchGPS(); keepAwake(true); setFollowButton(true);
  $('gps-status').textContent = 'Asking for your location…';
- watchId = navigator.geolocation.watchPosition(gpsUpdate, err => { const t = gpsErrorText(err); stopGPS(t); toast(t); }, {enableHighAccuracy: true, maximumAge: 3000, timeout: 20000});
- const f = $('follow-gps'); f.setAttribute('aria-pressed', 'true'); f.setAttribute('aria-label', 'Stop following my location');
- if (!state.routes.length) toast('Following your location. Load a route to see progress.');
+ updateJourney();
+}
+function stopGuidance(message) {
+ if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+ const was = guide.active; watchId = null; guide.active = false; guide.resumeOnVisible = false; guide.paused = false;
+ keepAwake(false); speaker.stop(); setFollowButton(false); setPause(false); highlightStep(-1);
+ $('gps-status').textContent = message || 'GPS is off. Location is never stored.';
+ if (was) notify(message || 'Guidance stopped.', {force: true, key: 'stop' + Date.now()});
+ updateJourney();
+}
+function setPause(on) {
+ guide.paused = on; const b = $('guide-pause');
+ b.setAttribute('aria-pressed', String(on)); b.querySelector('span').textContent = on ? 'Paused' : 'Pause'; // name stays "Pause voice"; aria-pressed carries the state
+ b.querySelector('use').setAttribute('href', on ? '#i-play' : '#i-pause');
+}
+$('guide-start').addEventListener('click', startGuidance);
+$('cta-start').addEventListener('click', () => { startGuidance(); if (!matchMedia('(min-width: 900px)').matches) setSheet('half'); $('journey-preview').scrollIntoView({block: 'start', behavior: reducedMotion ? 'auto' : 'smooth'}); });
+$('guide-stop').addEventListener('click', () => stopGuidance());
+$('guide-pause').addEventListener('click', () => {
+ const on = !guide.paused; setPause(on);
+ if (on) { speaker.stop(); speaker.announce('Voice paused. GPS guidance continues on screen.'); }
+ else speaker.say('Voice resumed.', {force: true, key: 'resume' + Date.now()});
+});
+$('follow-gps').addEventListener('click', () => {
+ if (guide.active) return stopGuidance();
+ if (!guide.tracker) { toast('Load a route first. Showing your location.'); return $('locate').click(); }
+ startGuidance();
 });
 $('locate').addEventListener('click', async () => {
  try { const p = await getPosition(); gpsUpdate(p); if (map) map.easeTo({center: [p.coords.longitude, p.coords.latitude], zoom: 16, duration: reducedMotion ? 0 : 500}); }
  catch (e) { const t = gpsErrorText(e); $('gps-status').textContent = t; toast(t); }
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden && watchId !== null) stopGPS('GPS paused while Pathway was in the background. Choose Follow to resume.'); });
-$('journey-announce').addEventListener('click', () => speak($('journey-badge').textContent + '. ' + $('journey-message').textContent + ' ' + $('journey-distance').textContent + '. ' + $('journey-accuracy').textContent, true));
+// Browsers suspend GPS in the background: pause cleanly and resume when Pathway is visible again.
+document.addEventListener('visibilitychange', () => {
+ if (document.hidden && guide.active && watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; guide.resumeOnVisible = true; }
+ else if (!document.hidden && guide.resumeOnVisible) { guide.resumeOnVisible = false; watchGPS(); keepAwake(true); notify('Guidance resumed. Waiting for an updated GPS position.', {key: 'resumed' + Date.now()}); }
+});
+$('journey-announce').addEventListener('click', () => {
+ const t = guide.tracker;
+ if (!t) return speak('No route loaded yet. Choose a start and a destination.', true);
+ const parts = [$('latest-instruction').textContent];
+ if (lastGPS && guide.active) parts.push($('journey-distance').textContent.replace('Remaining:', 'Remaining') + '.', $('journey-badge').textContent.toLowerCase() === 'low gps accuracy' ? 'GPS accuracy is low.' : '');
+ else parts.push('Total distance ' + A.spokenDistance(t.length) + '.');
+ speak(parts.filter(Boolean).join(' '), true);
+});
+$('where-am-i').addEventListener('click', async () => {
+ const b = $('where-am-i'); b.setAttribute('aria-busy', 'true');
+ try {
+  const p = await getPosition({maximumAge: 5000});
+  gpsUpdate(p);
+  const acc = Math.round(p.coords.accuracy || 0);
+  let place = '';
+  try { place = await P.reverse(p.coords.latitude, p.coords.longitude); } catch { place = ''; }
+  speak((place ? 'Approximately near ' + place + '. ' : 'Your position was found, but no nearby place name is available. ') + 'GPS accuracy about ' + A.spokenDistance(acc) + '. Place names come from OpenStreetMap and may be imprecise.', true);
+ } catch (e) { const t = gpsErrorText(e); $('gps-status').textContent = t; speak(t, true); }
+ finally { b.removeAttribute('aria-busy'); }
+});
 $('journey-recalculate').addEventListener('click', async () => {
  if (!lastGPS || !state.end) return;
  const prev = {start: state.start, routes: state.routes, selected: state.selected, value: $('start-search').value};
@@ -522,16 +607,98 @@ $('journey-recalculate').addEventListener('click', async () => {
   state.start = here; $('start-search').value = here.name; state.routes = data.routes;
   state.selected = Math.max(0, state.routes.findIndex(r => r.profile === profile));
   drawMarkers(); refreshJourneyRoute(); renderRoutes(); drawRoutes();
-  toast('Rerouted from your location. Accessibility is still unverified.'); speak('Rerouted from your location.');
- } catch (e) { Object.assign(state, {start: prev.start, routes: prev.routes, selected: prev.selected}); $('start-search').value = prev.value; toast('Rerouting failed: ' + e.message); }
+  toast('Rerouted from your location. Accessibility is still unverified.', true);
+  notify('Rerouted from your location. ' + A.routeSummary(state.routes[state.selected]) + ' Next: ' + guide.tracker.firstInstruction(), {key: 'reroute' + Date.now()});
+ } catch (e) { Object.assign(state, {start: prev.start, routes: prev.routes, selected: prev.selected}); $('start-search').value = prev.value; toast('Rerouting failed: ' + e.message, true); notify('Rerouting failed. ' + e.message, {priority: 'high', key: 'reroute-fail'}); }
  finally { updateJourney(); }
 });
 
+/* ------------------------------------------------------------ audio mode + voice settings */
+function setAudioMode(on, {announce = true} = {}) {
+ state.audioMode = on; save();
+ app.classList.toggle('audio-mode', on); app.classList.remove('map-visible');
+ $('audio-mode').setAttribute('aria-pressed', String(on));
+ syncVoiceSettings();
+ if (on) { setSheet('full'); if (announce) notify('Audio mode on. The map is hidden. Search for a start and destination, then choose Start guidance.', {key: 'am' + Date.now()}); }
+ else { ensureMap(); setSheet(state.routes.length ? 'half' : 'peek'); if (map) setTimeout(() => map.resize(), 60); if (announce) speaker.announce('Audio mode off. Map view restored.'); }
+}
+$('audio-mode').addEventListener('click', () => setAudioMode(!state.audioMode));
+$('show-map').addEventListener('click', () => {
+ const on = !app.classList.contains('map-visible'); app.classList.toggle('map-visible', on);
+ $('show-map').lastChild.textContent = on ? 'Hide map' : 'Show map';
+ if (on) { ensureMap(); if (map) setTimeout(() => { map.resize(); fitView(); }, 60); }
+});
+function syncVoiceSettings() {
+ $('set-auto').checked = !!autoSpeak();
+ $('set-target-' + ((state.prefs.voiceTarget || 'voice') === 'voice' ? 'voice' : 'sr')).checked = true;
+ $('set-rate').value = String(state.prefs.rate || 1);
+ $('set-vibrate').checked = !!state.prefs.vibrate; $('set-wake').checked = state.prefs.wake !== false;
+ if (!('speechSynthesis' in window)) { $('set-target-voice').disabled = true; $('set-target-sr').checked = true; }
+}
+$('set-auto').addEventListener('change', e => { togglePref('spoken', e.target.checked); });
+qs('[name=voice-target]').forEach(r => r.addEventListener('change', () => { state.prefs.voiceTarget = r.value; speaker.stop(); save(); }));
+$('set-rate').addEventListener('change', e => { state.prefs.rate = Number(e.target.value); save(); speak('This is the new speaking speed.', true); });
+$('set-vibrate').addEventListener('change', e => { togglePref('vibrate', e.target.checked); if (e.target.checked) buzz(60); });
+$('set-wake').addEventListener('change', e => { state.prefs.wake = e.target.checked; save(); if (guide.active) keepAwake(e.target.checked); });
+
+/* ------------------------------------------------------------ experimental: read a sign (on-device OCR) */
+let visionLib = null, visionRun = 0;
+function loadVision() {
+ if (window.PathwayVision) return Promise.resolve();
+ return visionLib || (visionLib = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'vision.js'; s.onload = res; s.onerror = () => { visionLib = null; rej(Error('The camera reader could not be downloaded.')); }; document.head.appendChild(s); }));
+}
+$('vision-take').addEventListener('click', () => { $('vision-input').value = ''; $('vision-input').click(); });
+$('vision-cancel').addEventListener('click', async () => {
+ visionRun++; $('vision-cancel').hidden = true; $('vision-take').disabled = false;
+ if (window.PathwayVision) await PathwayVision.stop();
+ $('vision-status').textContent = 'Stopped. Nothing was saved.';
+});
+$('vision-input').addEventListener('change', async e => {
+ const file = e.target.files && e.target.files[0]; e.target.value = '';
+ if (!file) return;
+ const run = ++visionRun, status = $('vision-status'), out = $('vision-result');
+ $('vision-take').disabled = true; $('vision-cancel').hidden = false; out.hidden = true;
+ status.textContent = 'Reading text on this device…';
+ let lastPct = -1;
+ const progress = m => {
+  if (run !== visionRun || !m || typeof m.progress !== 'number') return;
+  const pct = Math.floor(m.progress * 4) * 25; // announce in 25% steps only
+  if (pct === lastPct) return; lastPct = pct;
+  status.textContent = (/recogniz/.test(m.status) ? 'Reading text' : 'Preparing the text reader (first use downloads about 6 MB)') + '… ' + pct + '%';
+ };
+ try {
+  await loadVision();
+  // A stalled download or an engine error inside the worker must never leave the person waiting forever.
+  const r = await Promise.race([PathwayVision.readText(file, progress), new Promise((_, rej) => setTimeout(() => rej(Error('Reading took too long.')), 120000))]);
+  if (run !== visionRun) return;
+  const msg = r.text ? 'Text found. This may be incomplete or wrong: ' + r.text + (r.confidence < 60 ? '. Low confidence; try again closer, steadier, or with more light.' : '.')
+   : 'No readable text found. Try moving closer, holding the phone steady, and making sure there is enough light.';
+  out.textContent = msg; out.hidden = false; status.textContent = 'Done. The photo was not saved.';
+  out.focus(); speak(msg, true);
+ } catch (err) {
+  if (run !== visionRun) return;
+  status.textContent = 'The text reader isn’t available: ' + (err.message || 'unknown error') + ' It needs a recent browser with WebAssembly SIMD (for example iOS 16.4+ or Chrome 91+).';
+ } finally { if (run === visionRun) { $('vision-take').disabled = false; $('vision-cancel').hidden = true; } }
+});
+addEventListener('pagehide', () => { if (window.PathwayVision) PathwayVision.stop(); });
+
 /* ------------------------------------------------------------ needs & display */
 function renderPrefs() {
- $('pref-groups').innerHTML = PREF_GROUPS.map(g => '<div class="pref-group"><h4>' + esc(g.title) + '</h4><div class="chips">' + g.items.map(([k, label, st]) =>
-  '<button type="button" class="chip" data-pref="' + k + '" aria-pressed="' + !!state.prefs[k] + '">' + esc(label) + '<small>' + STATUS_TEXT[st] + '</small></button>').join('') + '</div></div>').join('');
- qs('[data-pref]').forEach(b => b.addEventListener('click', () => { togglePref(b.dataset.pref); }));
+ const openState = Object.fromEntries(qs('.pref-more').map(d => [d.dataset.group, d.open]));
+ const unsupported = {vibrate: !navigator.vibrate && 'This browser can’t vibrate (iPhone browsers don’t support it).'};
+ const chip = ([k, label]) => unsupported[k]
+  ? '<button type="button" class="chip" data-pref="' + k + '" aria-disabled="true" aria-pressed="false" aria-describedby="pref-' + k + '-why">' + esc(label) + '</button><span class="visually-hidden" id="pref-' + k + '-why">' + esc(unsupported[k]) + '</span>'
+  : '<button type="button" class="chip" data-pref="' + k + '" aria-pressed="' + !!state.prefs[k] + '">' + esc(label) + '</button>';
+ const group = g => '<div class="pref-group" role="group" aria-labelledby="pg-' + g.id + ' pgd-' + g.id + '">' +
+  (g.collapsed ? '' : '<h4 id="pg-' + g.id + '">' + esc(g.title) + ' <span class="status-key ' + g.status + '">' + esc(g.key) + '</span></h4>') +
+  '<p class="group-desc" id="pgd-' + g.id + '">' + esc(g.desc) + '</p><div class="chips">' + g.items.map(chip).join('') + '</div></div>';
+ $('pref-groups').innerHTML = PREF_GROUPS.map(g => !g.collapsed ? group(g) :
+  '<details class="pref-more" data-group="' + g.id + '"' + (openState[g.id] ? ' open' : '') + '><summary><span id="pg-' + g.id + '">' + esc(g.title) +
+  ' <span class="status-key ' + g.status + '">' + esc(g.key) + '</span></span></summary>' + group(g) + '</details>').join('');
+ qs('[data-pref]').forEach(b => b.addEventListener('click', () => {
+  if (b.getAttribute('aria-disabled') === 'true') return toast(unsupported[b.dataset.pref]);
+  togglePref(b.dataset.pref);
+ }));
  applyDisplay();
 }
 function togglePref(k, value) {
@@ -539,7 +706,8 @@ function togglePref(k, value) {
  qs('[data-pref="' + k + '"]').forEach(b => b.setAttribute('aria-pressed', String(!!state.prefs[k])));
  applyDisplay();
  if (state.routes.length > 1 && ['stepfree', 'avoidstairs', 'shorter', 'simpler'].includes(k)) { state.selected = recommendIndex(state.routes); refreshJourneyRoute(); renderRoutes(); drawRoutes(false); }
- else if (k === 'simple') renderDetails();
+ else if (k === 'simple') { renderDetails(); refreshJourneyRoute(); }
+ syncVoiceSettings();
  if (k === 'lifts' && state.routes.length && !state.routes[0].illustrative) planRoutes();
 }
 function applyDisplay() {
@@ -547,7 +715,7 @@ function applyDisplay() {
  document.documentElement.classList.toggle('pw-contrast', !!state.prefs.contrast);
  restyleMap();
  qs('[data-access]').forEach(b => b.setAttribute('aria-pressed', String(!!state.access[b.dataset.access])));
- const missing = PREF_GROUPS.flatMap(g => g.items).filter(([k, , st]) => st === 'data' && state.prefs[k]).map(([, l]) => l.toLowerCase());
+ const missing = PREF_GROUPS.find(g => g.id === 'data').items.filter(([k]) => state.prefs[k]).map(([, l]) => l.toLowerCase());
  $('accessibility-note').textContent = (missing.length ? 'Not applied yet, because reliable Singapore data isn’t connected: ' + missing.join(', ') + '. ' : '') +
   'Preferences never make a route verified-safe.' + (state.prefs.vibrate && !navigator.vibrate ? ' Vibration isn’t supported in this browser.' : '');
  if (map) setTimeout(() => map.resize(), 50);
@@ -555,6 +723,7 @@ function applyDisplay() {
 qs('[data-access]').forEach(b => b.addEventListener('click', () => {
  const k = b.dataset.access; state.access[k] = !state.access[k];
  if (state.access[k]) PRESETS[k].forEach(p => { state.prefs[p] = true; });
+ if (k === 'blind' && state.access[k] && !state.audioMode) setAudioMode(true, {announce: false});
  save(); renderPrefs();
  if (state.routes.length > 1) { state.selected = recommendIndex(state.routes); refreshJourneyRoute(); renderRoutes(); drawRoutes(false); }
  alertSR(b.textContent + (state.access[k] ? ' selected. Related preferences turned on.' : ' deselected.'));
@@ -632,7 +801,7 @@ $('report-form').addEventListener('submit', async e => {
  try {
   await reportStore.add(payload);
   $('report-form').reset(); closeModal(); changePage('reports', false); toast('Demo report saved on this device only. It isn’t shared with anyone.');
- } catch (err) { toast(err.message); alertSR('Demo report not saved. ' + err.message); }
+ } catch (err) { toast(err.message, true); alertSR('Demo report not saved. ' + err.message); }
  finally { btn.disabled = false; btn.removeAttribute('aria-busy'); }
 });
 async function loadReports() {
@@ -670,9 +839,18 @@ addEventListener('online', () => { connectivity(); toast('Back online.'); }); ad
 /* ------------------------------------------------------------ start */
 async function startup() {
  ['liberty', 'positron', 'onemap'].forEach(s => $('provider-' + s).setAttribute('aria-pressed', String(s === state.mapStyle)));
- connectivity(); renderPrefs(); setupMap(); renderRoutes(); refreshJourneyRoute(); setSheet('peek');
+ if (state.audioMode || new URLSearchParams(location.search).get('mode') === 'audio') { state.audioMode = true; app.classList.add('audio-mode'); $('audio-mode').setAttribute('aria-pressed', 'true'); }
+ connectivity(); renderPrefs(); syncVoiceSettings(); renderRoutes(); refreshJourneyRoute(); setSheet(state.audioMode ? 'full' : 'peek');
+ // The planner is usable now; the map follows (skipped entirely in audio mode unless asked for).
+ if (!state.audioMode) requestAnimationFrame(() => setTimeout(ensureMap, 0));
+ registerServiceWorker();
  loadReports();
 }
-window.__pathway = {state, getMap: () => map}; // read-only hook for automated tests
+function registerServiceWorker() {
+ if (!('serviceWorker' in navigator) || location.protocol !== 'https:' && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') return;
+ // updateViaCache 'none': always check sw.js itself on the network, so a new deploy is picked up on the next visit.
+ addEventListener('load', () => navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).catch(() => {}));
+}
+window.__pathway = {state, getMap: () => map, mapInits: () => mapInits}; // read-only hook for automated tests
 startup();
 })();
