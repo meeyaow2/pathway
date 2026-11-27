@@ -1,0 +1,8 @@
+# Only public/ (static) and api/ (Python function) are needed in the cloud.
+server.py
+tests/
+docs/
+*.sqlite3
+.env
+.env.*
+__pycache__/
