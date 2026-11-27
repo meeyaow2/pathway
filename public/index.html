@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en-SG">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#6941C6">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://www.onemap.gov.sg; connect-src 'self' https://photon.komoot.io https://valhalla1.openstreetmap.de https://tiles.openfreemap.org https://www.onemap.gov.sg; worker-src 'self' blob:; child-src blob:; font-src 'self'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="description" content="Pathway: accessibility-first walking routes in Singapore. Compare wheelchair-profile and standard walking routes, with honest information about what is and isn't verified.">
+<title>Pathway — accessible walking routes in Singapore</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236941C6'/%3E%3Cpath d='M9 23c4-1 4-6 7-8s7-1 7-6' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='23' r='2.5' fill='%23F2EDFF'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+ <defs>
+  <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></symbol>
+  <symbol id="i-nav" viewBox="0 0 24 24"><path d="M3 11 21 3l-8 18-2-8z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 3v18M7 3 3 7M7 3l4 4M17 21V3M17 21l-4-4M17 21l4-4"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1 7.8 7.7 7.8-7.7 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h6.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H15"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4s1.5-1 5-1 5 2 8 2 3-.5 3-.5v11s-1 .5-3 .5-5-2-8-2-5 1-5 1"/></symbol>
+ </defs>
+</svg>
+
+<a class="skip-link" href="#sheet-content">Skip to journey details</a>
+<h1 class="visually-hidden">Pathway — accessibility-first walking routes in Singapore</h1>
+
+<div class="app" id="app" data-sheet="peek" data-page="planner">
+ <div id="map" role="region" aria-label="Map. Every route on the map is also described as text in the journey panel.">
+  <div class="map-fallback"><p>Loading Singapore map…</p></div>
+ </div>
+
+ <div id="offline-banner" class="banner hidden" role="alert">You're offline. Search and routing need a connection; saved journeys are still available.</div>
+
+ <div class="map-fabs" role="group" aria-label="Map controls">
+  <button type="button" id="locate" class="fab" aria-label="Show my location on the map"><svg class="icon"><use href="#i-locate"/></svg></button>
+  <button type="button" id="follow-gps" class="fab" aria-pressed="false" aria-label="Follow my location along the route"><svg class="icon"><use href="#i-nav"/></svg></button>
+  <button type="button" id="layers" class="fab" aria-expanded="false" aria-controls="layer-menu" aria-label="Map style and layers"><svg class="icon"><use href="#i-layers"/></svg></button>
+  <button type="button" id="report" class="fab fab-warn" aria-label="Report an obstacle"><svg class="icon"><use href="#i-alert"/></svg></button>
+  <div id="layer-menu" class="layer-menu hidden" role="group" aria-label="Map style">
+   <p class="menu-title">Map style</p>
+   <button type="button" id="provider-liberty" class="menu-item" aria-pressed="true">Streets <small>OpenFreeMap</small></button>
+   <button type="button" id="provider-positron" class="menu-item" aria-pressed="false">Minimal <small>OpenFreeMap</small></button>
+   <button type="button" id="provider-onemap" class="menu-item" aria-pressed="false">OneMap <small>Singapore Land Authority</small></button>
+   <label class="menu-check"><input type="checkbox" id="show-reports" checked> Show demo barrier reports <small>(this device only)</small></label>
+  </div>
+ </div>
+
+ <div class="panel" id="panel">
+  <header class="search-card" id="search-card">
+   <div class="brand-row">
+    <span class="brand"><svg class="icon brand-mark" aria-hidden="true"><use href="#i-route"/></svg>Pathway</span>
+    <span class="pill" id="service-mode">ACCESS UNVERIFIED</span>
+   </div>
+   <form id="search-form" role="search" aria-label="Plan a walking route" novalidate>
+    <div class="search-fields">
+     <div class="field-row">
+      <label for="start-search" class="field-label"><span class="dot dot-a" aria-hidden="true"></span>From</label>
+      <input id="start-search" type="text" inputmode="search" enterkeyhint="search" placeholder="Address, place or postal code" autocomplete="off" autocapitalize="words" spellcheck="false"
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="start-suggestions" aria-describedby="search-help">
+      <button type="button" id="gps-start" class="icon-btn" aria-label="Use my current location as the starting point"><svg class="icon"><use href="#i-locate"/></svg></button>
+     </div>
+     <div id="start-suggestions" class="suggestions hidden" role="listbox" aria-label="Starting point suggestions"></div>
+     <div class="field-row">
+      <label for="end-search" class="field-label"><span class="dot dot-b" aria-hidden="true"></span>To</label>
+      <input id="end-search" type="text" inputmode="search" enterkeyhint="search" placeholder="Address, place or postal code" autocomplete="off" autocapitalize="words" spellcheck="false"
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="end-suggestions" aria-describedby="search-help">
+      <button type="button" id="swap-address" class="icon-btn" aria-label="Swap start and destination"><svg class="icon"><use href="#i-swap"/></svg></button>
+     </div>
+     <div id="end-suggestions" class="suggestions hidden" role="listbox" aria-label="Destination suggestions"></div>
+    </div>
+    <p id="search-help" class="visually-hidden">Type at least 3 characters, such as a street address, a six-digit postal code, a building or a landmark. Use the arrow keys to choose a suggestion.</p>
+   </form>
+   <p class="status-line" id="address-status" role="status" aria-live="polite"></p>
+   <div class="quick-picks" id="demo-fields" role="group" aria-label="Sample places">
+    <span class="quick-label">Try:</span>
+    <button type="button" class="chip-sm" data-sample="orchard">Orchard MRT → Somerset MRT</button>
+    <button type="button" class="chip-sm" data-sample="ion">ION Orchard → Paragon</button>
+   </div>
+  </header>
+
+  <section class="sheet" id="sheet" aria-label="Journey panel">
+   <button type="button" class="sheet-handle" id="sheet-handle" aria-expanded="false" aria-controls="sheet-content">
+    <span class="grip" aria-hidden="true"></span><span class="visually-hidden" id="sheet-handle-label">Expand journey panel</span>
+   </button>
+   <div class="sheet-content" id="sheet-content" tabindex="-1">
+
+    <section id="planner" class="page" aria-labelledby="planner-heading">
+     <h2 id="planner-heading" class="visually-hidden">Plan a route</h2>
+
+     <div class="row-between"><h3 class="h3">Route options</h3><span class="muted small" id="route-source">Awaiting addresses</span></div>
+     <div id="routes" class="routes" aria-live="polite"></div>
+     <div class="cta-row">
+      <button type="button" id="plan" class="btn primary">Get walking directions</button>
+      <button type="button" id="save" class="btn icon-only" aria-label="Save this journey"><svg class="icon"><use href="#i-heart"/></svg></button>
+     </div>
+     <p class="callout" id="safety">Routes come from community map data and are <strong>not verified</strong> for accessibility. Check kerbs, slopes, lifts and crossings yourself.</p>
+
+     <section class="journey" id="journey-preview" aria-labelledby="journey-heading">
+      <div class="row-between"><h3 class="h3" id="journey-heading">Journey progress</h3><span class="flag" id="journey-badge">NOT NAVIGATING</span></div>
+      <p id="journey-message" class="muted" role="status" aria-live="polite">Load a walking route, then choose Follow to see approximate progress.</p>
+      <div class="meter" role="progressbar" id="journey-progress" aria-label="Estimated journey progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="journey-fill"></div></div>
+      <div class="journey-stats"><span id="journey-distance">Remaining: —</span><span id="journey-accuracy">GPS accuracy: —</span></div>
+      <p id="gps-status" class="small muted" role="status" aria-live="polite">GPS is off. Location is never stored.</p>
+      <div class="btn-row">
+       <button type="button" id="journey-announce" class="btn"><svg class="icon"><use href="#i-speaker"/></svg>Read update</button>
+       <button type="button" id="journey-recalculate" class="btn" disabled><svg class="icon"><use href="#i-refresh"/></svg>Reroute from here</button>
+      </div>
+     </section>
+
+     <section class="details" aria-labelledby="details-title">
+      <div class="row-between"><h3 class="h3" id="details-title">Walking directions</h3><span class="flag" id="verification">NOT VERIFIED</span></div>
+      <p id="route-detail" class="muted">Choose a start and destination to see step-by-step directions.</p>
+      <ol id="steps" class="steps"></ol>
+      <button type="button" id="read-summary" class="btn"><svg class="icon"><use href="#i-speaker"/></svg>Read route aloud</button>
+     </section>
+
+     <section class="needs" id="needs" aria-labelledby="needs-heading">
+      <h3 class="h3" id="needs-heading">Your needs</h3>
+      <p class="muted small">Choose everything that applies. Each option says whether it changes routes today or needs data that isn't available yet. Saved on this device only.</p>
+      <div class="chips" role="group" aria-label="Quick setup">
+       <button type="button" class="chip" data-access="wheelchair" aria-pressed="false">Wheelchair user</button>
+       <button type="button" class="chip" data-access="mobility" aria-pressed="false">Limited mobility</button>
+       <button type="button" class="chip" data-access="blind" aria-pressed="false">Blind</button>
+       <button type="button" class="chip" data-access="lowvision" aria-pressed="false">Low vision</button>
+       <button type="button" class="chip" data-access="hearing" aria-pressed="false">Deaf / hard of hearing</button>
+       <button type="button" class="chip" data-access="elderly" aria-pressed="false">Older traveller</button>
+       <button type="button" class="chip" data-access="fatigue" aria-pressed="false">Fatigue / need rests</button>
+       <button type="button" class="chip" data-access="cognitive" aria-pressed="false">Cognitive / sensory</button>
+      </div>
+      <div id="pref-groups"></div>
+      <p id="accessibility-note" class="callout small" role="status">Preferences never make a route verified-safe.</p>
+     </section>
+    </section>
+
+    <section id="reports" class="page hidden" aria-labelledby="reports-heading">
+     <div class="row-between"><h2 class="h2" id="reports-heading" tabindex="-1">Barrier reports <span class="flag">DEMO</span></h2><button type="button" class="btn primary" id="new-report">Try a report</button></div>
+     <p class="callout small" id="storage-note"><strong>Local demonstration.</strong> Reports you add are saved only in this browser on this device. They aren’t sent to anyone, aren’t shared with other users and never change routes.</p>
+     <div class="stats"><div class="stat"><strong id="report-count">0</strong><small>Demo reports on this device</small></div><div class="stat"><strong>0</strong><small>Live community reports (not connected yet)</small></div></div>
+     <div class="list" id="report-list" aria-live="polite"></div>
+    </section>
+
+    <section id="saved" class="page hidden" aria-labelledby="saved-heading">
+     <h2 class="h2" id="saved-heading">Saved journeys</h2>
+     <p class="muted">Saved in this browser only. Not shared across devices.</p>
+     <div class="list" id="saved-list"></div>
+    </section>
+
+    <section id="about" class="page hidden" aria-labelledby="about-heading">
+     <h2 class="h2" id="about-heading">About Pathway</h2>
+     <p>Pathway helps people with different access needs compare walking routes in Singapore, and is honest about what is known and what still needs verifying.</p>
+     <h3 class="h3">What the data can and can't tell you</h3>
+     <ul class="plain">
+      <li><strong>Wheelchair-profile route:</strong> computed by the free Valhalla router to avoid steps recorded in OpenStreetMap. It's a <em>computed</em> route, not a <em>verified</em> accessible one: map data can be missing or out of date.</li>
+      <li><strong>Not yet available:</strong> live lift status, kerb heights, slope gradients, ramps, shelter, tactile paving, rest seating and crossing safety. Pathway shows these as <em>unknown</em>, never as safe.</li>
+      <li><strong>Barrier reports</strong> are a local demonstration. They stay in your browser and aren't shared.</li>
+      <li><strong>Privacy:</strong> there's no Pathway server. Searches and route requests go directly from your browser to Photon and Valhalla. Your GPS position is used only on your device.</li>
+     </ul>
+     <h3 class="h3">Sources</h3>
+     <p class="small muted" id="provider-info">Map: OpenFreeMap / OpenMapTiles, or OneMap © Singapore Land Authority · Search: Photon by komoot · Routing: Valhalla (FOSSGIS public server, best effort, no uptime guarantee) · Data © OpenStreetMap contributors.</p>
+     <p class="callout">Pathway is a prototype. Don't rely on it as your only aid for independent navigation or for real-time safety information.</p>
+    </section>
+   </div>
+  </section>
+
+  <nav class="tabbar" aria-label="Main">
+   <button type="button" data-page="planner" aria-current="page"><svg class="icon"><use href="#i-route"/></svg><span>Plan</span></button>
+   <button type="button" data-page="reports"><svg class="icon"><use href="#i-flag"/></svg><span>Reports</span></button>
+   <button type="button" data-page="saved"><svg class="icon"><use href="#i-heart"/></svg><span>Saved</span></button>
+   <button type="button" data-page="about"><svg class="icon"><use href="#i-info"/></svg><span>About</span></button>
+  </nav>
+ </div>
+</div>
+
+<div class="modal-shell hidden" id="modal">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-desc">
+  <div class="row-between"><h2 class="h2" id="modal-title">Report an obstacle (demo)</h2><button type="button" class="icon-btn" id="close-modal" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button></div>
+  <p class="muted small" id="modal-desc">This is a demonstration: your report is saved only in this browser and isn't shared with anyone. Don't include personal information.</p>
+  <form id="report-form" novalidate>
+   <div class="field"><label for="where">Where is it?</label><input id="where" required minlength="3" maxlength="120" placeholder="e.g. Lift at Exit B, Orchard MRT" autocomplete="off"></div>
+   <div class="field"><label for="report-pin">Map position</label>
+    <select id="report-pin"><option value="center">Centre of the map</option><option value="gps">My current GPS position</option><option value="end">My destination</option><option value="start">My starting point</option><option value="none">Don't add a map position</option></select></div>
+   <div class="field"><label for="category">Barrier type</label><select id="category"><option>Lift not working</option><option>Steps / no ramp</option><option>Blocked footpath</option><option>Steep slope</option><option>Uneven pavement</option><option>Crossing difficult</option><option>No shelter</option><option>Other access issue</option></select></div>
+   <div class="field"><label for="description">What did you notice?</label><textarea id="description" required minlength="10" maxlength="1000" rows="4" aria-describedby="description-hint description-error"></textarea>
+    <p class="small muted" id="description-hint">At least 10 characters.</p><p class="field-error hidden" id="description-error"></p></div>
+   <div class="btn-row end"><button type="button" class="btn" id="cancel-report">Cancel</button><button type="submit" class="btn primary" id="submit-report">Save demo report</button></div>
+  </form>
+ </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="sr-alert" class="visually-hidden" role="alert" aria-atomic="true"></div>
+
+<script src="vendor/maplibre-gl-4.7.1/maplibre-gl.js"></script>
+<script src="providers.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

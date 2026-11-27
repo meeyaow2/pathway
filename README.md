@@ -1,112 +1,100 @@
-# Pathway — Singapore accessibility-first journey prototype
+# Pathway — accessibility-first walking routes for Singapore
 
-Functional, mobile-responsive MVP with OpenFreeMap/MapLibre basemap, address-first official OneMap location search and standard walking API, illustrative planning scenarios, mobility preferences, saved planning scenarios, and unverified community barrier reports.
+**Live site:** https://meeyaow2.github.io/pathway/
 
-## Run (Python 3.10+; no pip packages required)
+Pathway helps people with different access needs plan walks in Singapore. It compares a **wheelchair-profile route** (computed to avoid steps recorded in map data) with a **standard walking route**, shows the stairs, lifts and crossings the map data records, and is explicit about what isn't verified.
 
-```bash
-cd pathway
-python server.py
-```
-Open http://127.0.0.1:8765 . An internet connection is needed for MapLibre (CDN) and OpenFreeMap map tiles.
+It's a mobile-first static website. There's no server and no API keys: the browser talks directly to free OpenStreetMap services.
 
-## Free Singapore map (no key or card required)
+> **Safety:** Pathway is a personal prototype. A wheelchair-profile route is *computed*, not *verified*. Kerbs, slopes, ramps, live lift status and crossing safety are unknown. Don't rely on Pathway as your only aid for independent travel.
 
-Pathway uses **MapLibre GL JS + OpenFreeMap** to display interactive Singapore streets with touch gestures, markers, popups, zoom controls, and route overlays. Choose **Streets** or **Minimal** above the map. The map tiles require internet access but **no Google Maps key or billing account**.
+## What works and what's simulated
 
-The demo place selectors work immediately. For Singapore-wide address search and real walking directions, configure the **OneMap Search and Routing APIs** as described below. This means the map itself is free, while official Singapore search/routing requires a OneMap developer account and token.
+| Feature | Status |
+|---|---|
+| Search addresses, six-digit postal codes, buildings and landmarks with autocomplete | **Working** (Photon, OpenStreetMap data; coverage depends on OSM) |
+| Choose start and destination; use GPS as the start | **Working** |
+| Real walking routes with distance, time and step-by-step directions | **Working** (Valhalla public server, best effort) |
+| Compare a wheelchair-profile route with a standard route; stairs, lift and crossing counts | **Working**, computed from community map data and **not verified** |
+| Rank routes by your needs (avoid stairs, prefer lifts, shorter, fewer turns) | **Working** |
+| Shelter, rest stops, ramps, kerbs, slopes, accessible crossings | **Not available.** Selectable, labelled *Data needed, not applied yet* |
+| GPS follow, progress, current step, off-route warning, reroute | **Prototype** (approximate; not turn-by-turn navigation) |
+| Spoken updates, simplified steps, larger text, high contrast, vibration (Android) | **Working** |
+| Saved journeys | **Working** (this browser only) |
+| Barrier reports | **Simulated.** Local demo saved in your browser only, never shared |
+| Offline and error handling | **Working** (offline banner, timeouts, labelled straight-line fallback; no offline maps) |
 
-**Safety:** A basemap is not an accessible routing engine. Demo lines are straight conceptual connections; OneMap walking routes are not wheelchair-accessibility-certified. Pathway does not assert step-free access, lift status, shelter, curb or gradient suitability without verified evidence.
+## Run locally
 
-## GPS journey progress preview
-
-When you select two Singapore addresses and load a real **OneMap standard walking route**, choose **Follow** to opt into browser GPS updates. The Journey progress preview shows:
-
-- An approximate position along the returned walking geometry, calculated locally in your browser.
-- Approximate remaining distance along the route.
-- The browser-reported GPS accuracy.
-- Warnings when GPS accuracy is poor or the estimated position appears far from the route.
-- A **Read update** button for optional spoken status, plus an explicit **Recalculate from GPS** button that requests a new OneMap walking route.
-
-Location follow stops when you choose **Stop GPS** or the page becomes hidden. Pathway does not save your GPS history to its database. GPS must be permitted by the browser, usually on HTTPS or localhost.
-
-**Safety:** This is an experimental progress preview, *not* turn-by-turn navigation or an accessible pedestrian navigation aid. No automatic rerouting, crossing instructions, environmental hazard detection, or wheelchair/blind-route assurance is provided. Do not treat GPS proximity as confirmation of arrival at a safe or accessible entrance. Demo straight-line routes are deliberately excluded from GPS route matching.
-
-## Address-to-address route planning (new default)
-
-Pathway now opens with **From / To address search**, instead of MRT-only dropdowns. Enter a Singapore street address, building name, landmark, or six-digit postal code. Suggestions are fetched from OneMap and displayed below the field; choose the correct match to place it on the map. Use **Swap addresses** or **GPS** for the starting position. Once both positions are selected, choose **Get walking directions** to request a real standard walking route.
-
-Address suggestions and the walking API require the free OneMap developer account and server environment variables described below. If no credentials are configured, choose **Sample places** for a limited offline demo, but those sample lines are not walkable routes. The OpenFreeMap basemap itself remains free without a key.
-
-**Important:** The OneMap walking API does not validate wheelchair accessibility, blind pedestrian navigation, crossing safety, live lift status or sheltered route suitability. These capabilities require separately verified information.
-
-## Configure a OneMap access token safely
-
-The backend accepts `ONEMAP_TOKEN` as an environment variable. **Never paste a token into GitHub, config.js, or browser code.** Access tokens expire after about 72 hours and cannot refresh themselves; for automatic renewal use the OneMap registered email/password server-side, as documented below.
-
-PowerShell (current terminal session only):
-
-```powershell
-$env:ONEMAP_TOKEN = '<paste a newly issued token in your own terminal>'
-python server.py
-```
-
-Mac / Linux (current terminal session only):
+Use any static file server. For example:
 
 ```bash
-export ONEMAP_TOKEN='<paste a newly issued token in your own terminal>'
-python server.py
+python3 -m http.server 8765 -d public
 ```
 
-Do not share tokens in chat, commit them or put them in public deployment configuration. For deployment, use the hosting provider's encrypted environment-variable settings. Once authenticated, search by Singapore postal code, address or building name; select results to display standard walking directions. If the token expires, replace it or configure refresh credentials.
+Then open http://127.0.0.1:8765.
 
-## Turn on OneMap search + standard walking routes
+## Test
 
-Register for a OneMap account at https://www.onemap.gov.sg/apidocs/ . Set `ONEMAP_EMAIL` and `ONEMAP_PASSWORD` in your terminal before starting the server. The server keeps credentials private, exchanges them for an expiring token, and proxies requests. Do NOT add secrets to frontend source. Copy `.env.example` for reference; this small dependency-free example does **not** automatically read `.env`.
+Unit tests (no network, no dependencies):
 
-Mac/Linux:
 ```bash
-export ONEMAP_EMAIL='your-email'
-export ONEMAP_PASSWORD='your-password'
-python server.py
+node --test tests/providers.test.js
 ```
 
-PowerShell:
-```powershell
-$env:ONEMAP_EMAIL="your-email"
-$env:ONEMAP_PASSWORD="your-password"
-python server.py
+The end-to-end browser test needs Playwright and calls the live services. First serve the site under `/pathway/`, like GitHub Pages does:
+
+```bash
+mkdir -p /tmp/site && ln -sfn "$PWD/public" /tmp/site/pathway && python3 -m http.server 8765 -d /tmp/site
 ```
 
-## Safety and scope
+Then, in another terminal:
 
-- **Illustrative demo connections are straight lines, not actual pedestrian routes. Do not navigate with them.**
-- **OneMap's regular `walk` API does not verify step-free access, lifts, shelter, obstructions or wheelchair suitability.** Mobility preferences do not influence its route selection.
-- SLA's **Barrier-Free Access (BFA)** routing requires separate approval; no BFA routes or BFA API access are included or implied.
-- Community reports use SQLite and have **unverified** status. No real moderation or identity verification yet, so do not deploy the submissions endpoint publicly as-is.
-- No login, rate limiting, geospatial report verification, production privacy program, offline routing or real-time lift feeds. Use only in a local test environment.
-- Saved scenarios are local to the browser. Report submissions are on the server in `pathway.sqlite3`.
-- Location permission is optional and is used only to centre the map; not stored.
+```bash
+node tests/e2e.js
+```
 
-## API
+To test the published site instead, set `PATHWAY_URL`:
 
-- `GET /api/status`
-- `GET /api/search?q=...` (OneMap token required)
-- `GET /api/route?start=lat,lng&end=lat,lng` (OneMap token required; standard **walking** route)
-- `GET /api/reports`
-- `POST /api/reports` with `{location,category,description}`
+```bash
+PATHWAY_URL=https://meeyaow2.github.io/pathway/ node tests/e2e.js
+```
 
-## What is needed for production
+## Deploy (GitHub Pages)
 
-1. Apply for [SLA BFA approval](https://www.onemap.gov.sg/apidocs/bfa), implement the actual approved API contract, and validate response metadata and route freshness.
-2. Add user authentication, access control, consent, reporting moderation, throttling and anti-abuse protections before inviting public reports.
-3. Conduct route-level accessibility testing with wheelchair users and people with diverse mobility needs.
-4. Add documented coverage boundaries, source attribution, lift-status feeds (where licenced), accessibility evidence timestamps and fallback options.
-5. Add automated integration and browser tests, telemetry that respects privacy, and a deployment configuration.
+`.github/workflows/pages.yml` runs the tests on every pull request. On every push to `main` it tests and then publishes **only the `public/` folder**.
 
-### Sources
+**One-time setup:** in the repository, go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**. Until you do, Pages keeps publishing the old files from the root of `main`.
 
-- https://www.onemap.gov.sg/apidocs/
-- https://www.onemap.gov.sg/apidocs/routing
-- https://www.onemap.gov.sg/apidocs/bfa
-- https://www.onemap.gov.sg/docs/maps/
+Production is whatever is on `main`. Development happens on branches and pull requests, which are tested but not published.
+
+## Project structure
+
+```
+public/                 the website (published as-is)
+  index.html            markup, Content-Security-Policy, SVG icons
+  styles.css            design tokens + components (see docs/design-system.md)
+  providers.js          search, routing and demo-report storage (browser-only, no keys)
+  app.js                UI: map, search, routes, sheet, GPS, preferences, saved, reports
+  vendor/maplibre-gl-4.7.1/   bundled map library (BSD-3-Clause)
+tests/                  unit tests (node:test) + Playwright end-to-end test
+docs/                   design system, accessibility data sources, future backend
+```
+
+## Services, limits and licences
+
+| Service | Used for | CORS | Limits | Licence / attribution |
+|---|---|---|---|---|
+| [Photon](https://photon.komoot.io) (komoot) | Search | `*` | Fair use, throttled if heavy; no SLA | © OpenStreetMap contributors (ODbL) |
+| [Valhalla](https://valhalla1.openstreetmap.de) (FOSSGIS) | Routing | `*` | **Max 1 request/second**, no availability guarantee ([terms](https://fossgis.de/arbeitsgruppen/osm-server/nutzungsbedingungen)). Pathway spaces and caches requests | © OpenStreetMap contributors |
+| [OpenFreeMap](https://openfreemap.org) | Map tiles | `*` | Free, no key | OpenMapTiles, © OpenStreetMap contributors |
+| [OneMap](https://www.onemap.gov.sg) basemap | Optional map style | — | Free tiles, no key | © Singapore Land Authority (logo shown) |
+
+**Not used on Pages:** the OneMap search and routing APIs. They need an account token, which would have to be embedded in public JavaScript. Pathway puts no tokens or credentials in the frontend.
+
+For more traffic, plan to self-host Valhalla and Photon, or add a small backend. See [docs/future-backend.md](docs/future-backend.md).
+
+## Docs
+- [Design system](docs/design-system.md): purple identity, tokens, components, contrast
+- [Singapore accessibility data sources](docs/accessibility-data-sources.md)
+- [Future backend](docs/future-backend.md)
