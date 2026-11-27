@@ -11,12 +11,12 @@ Status key: **Live** = called successfully from Pathway during development · **
 | **OneMap Search & Routing** (Singapore Land Authority) | Official addresses with postal codes; standard walking/drive/cycle/public-transport routing | Free developer account; token from `getToken` (about 3-day lifetime). Search now also requires a token | OneMap terms of use; attribution required | Authoritative addresses; walking routes have no accessibility attributes | **Not used on GitHub Pages**: needs a token that can't be kept secret in frontend code. Calls without a token returned *Unauthorized*. Possible with a future backend (see `future-backend.md`) |
 | **OneMap basemap tiles** | Official Singapore raster map | Free, no token | Attribution (OneMap logo + SLA) required | Official | **Live** — "OneMap" map style |
 | **OneMap Barrier-Free Access (BFA) routing** | Wheelchair-friendly routes tested and verified by wheelchair users, in selected areas | Via OneMap; exact `routeType` and approval process **unconfirmed** — check the Route Service section of the OneMap docs | OneMap terms | Highest-quality source found, but limited coverage (an SLA page says Bedok and Tampines are expected by early March 2026) | **Researched** — top priority once access terms are confirmed |
-| **LTA DataMall — Facilities Maintenance** (dynamic) | Ad hoc lift maintenance at MRT stations (real time) | Free DataMall AccountKey (server-side only) | Singapore Open Data Licence | Real time; covers MRT lifts only, not HDB or mall lifts | **Researched** — next milestone: warn when a route uses a station with a lift under maintenance |
+| **LTA DataMall — Facilities Maintenance** (dynamic) | Ad hoc lift maintenance at MRT stations (real time) | Free DataMall AccountKey sent as a request header; the [API terms](https://datamall.lta.gov.sg/content/datamall/en/api-terms-of-service.html) require keeping it confidential | Singapore Open Data Licence / LTA API terms | Real time; MRT lifts only. A record names a station, not necessarily the affected exit or route | **Researched, not integrated.** A key in GitHub Pages JavaScript would be public, so this needs a small proxy (see `future-backend.md`). The summary shows *Lift status: unknown* |
 | **LTA DataMall — Covered Linkway** (static geospatial) | Polygons of covered pedestrian linkways | Shapefile download | Singapore Open Data Licence | Updated quarterly (latest listing: September 2026). Polygons, so they must be matched to footpaths | **Researched** — enables a real "sheltered route" preference |
-| **LTA — MRT Station Exit** (data.gov.sg) | Station exit locations | Open download | Singapore Open Data Licence | Static; doesn't say which exits are barrier-free | **Researched** |
+| **LTA — MRT Station Exit** (data.gov.sg, GeoJSON `d_b39d3a0871985372d7e1637193335da5`) | 613 exit locations at 188 stations (name, exit code) | Open download | Singapore Open Data Licence v1.0 | Latest record 16 Oct 2026; retrieved 27 Nov 2026. **No lift or step-free attributes** | **Integrated** as a bundled snapshot (`public/data/mrt-exits.json`): station search, exit chooser, exits on the map, labelled *Official* |
 | **MRT barrier-free station access** | MOT states every MRT station has at least one barrier-free route from entrance to platform, with a lift | Policy statement; **no per-exit dataset found** | — | — | Shown as unknown per exit |
 | **Other LTA geospatial layers** (kerb line, pedestrian overhead bridges/underpasses, road crossings) | Street furniture and structures | DataMall / data.gov.sg | Singapore Open Data Licence | Kerb *lines* exist; kerb *heights*, ramps and slope gradients were **not** found | **Researched** |
-| **OpenStreetMap accessibility tags** (`wheelchair`, `highway=steps`, `kerb`, `incline`, `tactile_paving`, `covered`) | Community-mapped details | Via routers above or Overpass | ODbL | Varies street by street; treated as unverified | Partly used (through Valhalla) |
+| **OpenStreetMap via Valhalla `trace_attributes`** | Per-segment use (footway, steps, elevator, escalator, pedestrian crossing, road), surface, tunnel and bridge flags | Free; same server and 1 request/second policy as routing | ODbL | Community-mapped; coverage varies street by street. Grade values are elevation-model noise and **not used** | **Integrated**: the Journey Accessibility Summary, labelled *Map data* |
 | **HDB estates** | Lift access and ramps at blocks | **No public per-block entrance or ramp dataset found** | — | — | Unknown |
 | **BCA accessibility (Universal Design Mark / Friendly Buildings)** | Building-level accessibility recognition | Public listings; API **unconfirmed** | — | Building-level, not route-level | **Researched** |
 | **Tactile paving, accessible crossings (e.g. Green Man+), rest seating** | Visual-impairment and fatigue needs | **No authoritative public dataset found** | — | — | Shown as "Data needed, not applied" |
@@ -26,15 +26,20 @@ Status key: **Live** = called successfully from Pathway during development · **
 
 | Need | Best available source | Status in Pathway |
 |---|---|---|
-| MRT station exits | LTA *MRT Station Exit* (data.gov.sg, open). Exit locations only, not which exits are barrier-free | Not yet used. The OneMap basemap shows numbered exits visually only |
+| MRT station exits | LTA *MRT Station Exit* (official locations) | **Integrated** (locations only) |
 | Accessible station entrances, lift locations | No open per-exit dataset found. MOT states every station has at least one barrier-free route | **Unknown.** Never assumed |
-| Lift maintenance | LTA DataMall *Facilities Maintenance* (real time, needs an AccountKey, so it needs a backend) | Not connected |
+| Lift maintenance | LTA DataMall *Facilities Maintenance* (real time, needs an AccountKey, so it needs a backend) | Researched; shown as *unknown* |
 | Tactile paving | OpenStreetMap `tactile_paving=*`, sparse and unverified. No government dataset found | **Unknown.** Never spoken as present |
 | Accessible / audible crossings (e.g. Green Man+) | No open location dataset confirmed | **Unknown.** Every crossing is announced with uncertainty |
-| Sheltered paths | LTA *Covered Linkway* (quarterly shapefile) | Not yet processed |
+| Sheltered paths | LTA *Covered Linkway* (quarterly shapefile); OpenStreetMap `covered=yes` | Not processed. Underground and indoor sections from OpenStreetMap are shown instead, with covered linkways listed as *unknown* |
 | Building entrances | OpenStreetMap `entrance=*` (patchy) | Not used. Arrival messages say the entrance can't be located |
 
 All spoken route facts are **community map observations** (OpenStreetMap through Valhalla) and are labelled that way. Nothing is presented as verified.
+
+## Investigated in Phase 3 but not shipped
+- **Overpass API** (OpenStreetMap queries for benches, `covered=yes` walkways, `entrance=*`, `wheelchair=*`, `kerb=*`, `tactile_paving=*`): free, CORS-enabled and ideal for seating, covered walkways and building entrances. It was **unreachable from the development environment** (the connection is closed mid-request), so it couldn't be tested, and Pathway doesn't ship untested data claims. It's the recommended next data source.
+- **OneMap search and routing**: need a token, so they need a backend.
+- **Nominatim** (OpenStreetMap Foundation) **is** integrated as the backup search, used only on explicit search and at most 1 request/second, per its policy.
 
 ## Principles applied in the app
 

@@ -16,7 +16,7 @@ const SHELL = 'pathway-shell-' + BUILD;
 const VENDOR = 'pathway-vendor-v1';
 const TILES = 'pathway-tiles-v1';
 const MAX_TILES = 600;
-const SHELL_FILES = ['./', 'styles.css', 'providers.js', 'audio.js', 'app.js'];
+const SHELL_FILES = ['./', 'styles.css', 'providers.js', 'audio.js', 'access.js', 'app.js', 'data/mrt-exits.json'];
 const TILE_HOSTS = ['www.onemap.gov.sg', 'tiles.openfreemap.org'];
 
 self.addEventListener('install', event => {

@@ -14,16 +14,17 @@ const token = name => getComputedStyle(document.documentElement).getPropertyValu
 // Grouped by what each preference actually does, so the status is stated once per group (not under every chip).
 const PREF_GROUPS = [
  {id: 'route', status: 'applied', key: 'Changes routes', title: 'Route suggestions', desc: 'These change which route Pathway suggests.', items: [
-  ['stepfree', 'Wheelchair-profile routing'], ['avoidstairs', 'Avoid stairs'], ['lifts', 'Prefer lifts'], ['shorter', 'Shorter distance'], ['simpler', 'Fewer turns']]},
+  ['stepfree', 'Wheelchair-profile routing'], ['avoidstairs', 'Avoid stairs'], ['lifts', 'Prefer lifts'], ['shorter', 'Shorter distance'], ['simpler', 'Fewer turns'],
+  ['fewercrossings', 'Fewer road crossings'], ['avoidroads', 'Less walking along roads'], ['shelter', 'More underground or indoor (experimental)']]},
  {id: 'display', status: 'display', key: 'Changes display', title: 'Display and alerts', desc: 'These change how information is shown or announced.', collapsed: true, items: [
   ['spoken', 'Spoken updates'], ['simple', 'Simpler instructions'], ['large', 'Larger text'], ['contrast', 'High contrast'], ['vibrate', 'Vibration'], ['visual', 'Visual-only alerts']]},
  {id: 'data', status: 'data', key: 'Not applied yet', title: 'Not available yet', desc: 'Pathway has no reliable Singapore data for these, so they can’t change routes yet. You can still mark them so the app reminds you they are unknown.', collapsed: true, items: [
-  ['ramps', 'Ramps'], ['crossings', 'Accessible crossings'], ['slopes', 'Gentle slopes and kerbs'], ['shelter', 'Sheltered walkways'], ['rest', 'Rest stops and seating'], ['weather', 'Less weather exposure']]},
+  ['ramps', 'Ramps'], ['crossings', 'Accessible crossing signals'], ['slopes', 'Gentle slopes and kerbs'], ['weather', 'Covered linkways'], ['rest', 'Rest stops and seating']]},
 ];
 const PRESETS = {
- wheelchair: ['stepfree', 'avoidstairs', 'lifts'], mobility: ['avoidstairs', 'lifts', 'shorter'], blind: ['spoken', 'simple'],
- lowvision: ['large', 'contrast'], hearing: ['visual', 'vibrate'], elderly: ['avoidstairs', 'lifts', 'shorter', 'large'],
- fatigue: ['shorter', 'lifts', 'rest'], cognitive: ['simple', 'simpler'],
+ wheelchair: ['stepfree', 'avoidstairs', 'lifts', 'avoidroads'], mobility: ['avoidstairs', 'lifts', 'shorter'], blind: ['spoken', 'simple'],
+ lowvision: ['large', 'contrast'], hearing: ['visual', 'vibrate'], elderly: ['avoidstairs', 'lifts', 'shorter', 'large', 'fewercrossings'],
+ fatigue: ['shorter', 'lifts', 'shelter', 'rest'], cognitive: ['simple', 'simpler'],
 };
 const SAMPLES = {
  orchard: [{name: 'Orchard MRT Station', address: 'Orchard Road', lat: 1.3046, lng: 103.8318}, {name: 'Somerset MRT Station', address: 'Orchard Road', lat: 1.3004, lng: 103.839}],
@@ -32,7 +33,7 @@ const SAMPLES = {
 
 const state = {
  prefs: {stepfree: true, lifts: true}, access: {}, saved: [], reports: [], mapStyle: 'onemap', mapStyleChosen: false, showReports: true, audioMode: false,
- start: null, end: null, routes: [], selected: 0, planning: false, status: null,
+ start: null, end: null, routes: [], selected: 0, planning: false, status: null, summaries: [], userPicked: false, exclude: [],
 };
 try {
  const v3 = JSON.parse(localStorage.getItem('pathway-v3') || 'null');
@@ -52,16 +53,19 @@ const save = () => { try { localStorage.setItem('pathway-v3', JSON.stringify({pr
 let toastTimer;
 function toast(text, silent = false) { const t = $('toast'); t.setAttribute('aria-live', silent ? 'off' : 'polite'); t.textContent = text; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 4200); }
 function alertSR(text) { const a = $('sr-alert'); a.textContent = ''; setTimeout(() => { a.textContent = text; }, 50); }
-const A = window.PathwayAudio;
+const A = window.PathwayAudio, Access = window.PathwayAccess;
 const guide = {active: false, paused: false, tracker: null, wake: null, resumeOnVisible: false, waitingAnnounced: false};
 const autoSpeak = () => state.prefs.spoken ?? state.audioMode; // audio mode speaks by default unless switched off
 const speaker = new A.Speaker({polite: $('guide-live'), assertive: $('sr-alert'), synth: 'speechSynthesis' in window ? window.speechSynthesis : null,
  settings: () => ({auto: !!autoSpeak(), target: state.prefs.voiceTarget || 'voice', rate: Number(state.prefs.rate || 1), paused: guide.paused})});
 // notify: speak (if automatic speech is on) or, otherwise, hand the text to screen readers — never both.
-function notify(text, opts = {}) { const r = speaker.say(text, opts); if (r === 'silent') speaker.announce(text, opts.priority === 'high'); return r; }
+function notify(text, opts = {}) {
+ if (state.prefs.visual && !opts.force) { if (opts.priority !== 'low') toast(text, true); speaker.announce(text, opts.priority === 'high'); return 'visual'; } // visual-only alerts: on screen, never spoken
+ const r = speaker.say(text, opts); if (r === 'silent') speaker.announce(text, opts.priority === 'high'); return r;
+}
 function speak(text, force = false) { return speaker.say(text, {force, key: force ? 'f' + Date.now() : text}); }
 // Pathway's own voice only (screen-reader users already hear role=status updates for these).
-function voiceOnly(text) { if (speaker.channel === 'voice' && autoSpeak() && !guide.paused) speaker.say(text, {key: text, gap: 3000}); }
+function voiceOnly(text) { if (!state.prefs.visual && speaker.channel === 'voice' && autoSpeak() && !guide.paused) speaker.say(text, {key: text, gap: 3000}); }
 function buzz(pattern) { if (state.prefs.vibrate && navigator.vibrate) try { navigator.vibrate(pattern); } catch {} }
 
 const P = window.PathwayProviders;
@@ -158,6 +162,12 @@ function setupMap() {
   el.append(h, flag, d);
   new maplibregl.Popup({offset: 12}).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
  });
+ map.on('click', 'exits-circle', e => {
+  const f = e.features && e.features[0]; if (!f) return;
+  const el = document.createElement('div'); const h = document.createElement('strong'); h.textContent = f.properties.title;
+  const t = document.createElement('p'); t.style.margin = '4px 0 0'; t.textContent = 'Official LTA exit location. Lift or step-free access not in open data.';
+  el.append(h, t); new maplibregl.Popup({offset: 10}).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
+ });
  map.on('mouseenter', 'reports-circle', () => { map.getCanvas().style.cursor = 'pointer'; });
  map.on('mouseleave', 'reports-circle', () => { map.getCanvas().style.cursor = ''; });
 }
@@ -166,6 +176,7 @@ function addOverlays() {
  const empty = {type: 'FeatureCollection', features: []};
  if (!map.getSource('routes')) map.addSource('routes', {type: 'geojson', data: empty});
  if (!map.getSource('reports')) map.addSource('reports', {type: 'geojson', data: empty});
+ if (!map.getSource('exits')) map.addSource('exits', {type: 'geojson', data: empty});
  const add = layer => { if (!map.getLayer(layer.id)) map.addLayer(layer); };
  // Alternative = thinner, dashed, grey-violet; selected = solid purple with a white casing (pattern + width, not colour alone).
  add({id: 'route-alt', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], false], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': token('--map-route-alt'), 'line-width': 4, 'line-dasharray': [1.5, 1.5]}});
@@ -173,7 +184,15 @@ function addOverlays() {
  add({id: 'route-main', type: 'line', source: 'routes', filter: ['all', ['==', ['get', 'selected'], true], ['!', ['get', 'illustrative']]], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': token('--map-route'), 'line-width': 6}});
  add({id: 'route-illustrative', type: 'line', source: 'routes', filter: ['all', ['==', ['get', 'selected'], true], ['get', 'illustrative']], layout: {'line-cap': 'round'}, paint: {'line-color': token('--map-route'), 'line-width': 5, 'line-dasharray': [1, 2]}});
  add({id: 'reports-circle', type: 'circle', source: 'reports', paint: {'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 16, 9], 'circle-color': token('--map-report'), 'circle-stroke-color': token('--map-pin-border'), 'circle-stroke-width': 2.5}});
- drawRoutes(false); drawReports();
+ add({id: 'exits-circle', type: 'circle', source: 'exits', paint: {'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 4, 18, 8], 'circle-color': token('--map-pin-border'), 'circle-stroke-color': token('--map-route'), 'circle-stroke-width': 2.5}});
+ drawRoutes(false); drawReports(); drawExits();
+}
+async function drawExits() {
+ if (!map || !map.getSource('exits')) return;
+ let data = null; try { data = await P.loadExits(); } catch { return; }
+ const names = ['start', 'end'].map(w => state[w] && state[w].station).filter(Boolean);
+ const features = names.flatMap(nm => (data.byName.get(nm.toLowerCase()) || {exits: []}).exits.map(e => ({type: 'Feature', properties: {title: e.station + ' ' + e.exit}, geometry: {type: 'Point', coordinates: [e.lng, e.lat]}})));
+ map.getSource('exits').setData({type: 'FeatureCollection', features});
 }
 function restyleMap() { // re-read tokens, e.g. after high-contrast mode changes
  if (!map || !map.getLayer('route-main')) return;
@@ -277,23 +296,35 @@ function setupCombo(which) {
  const close = () => { list.classList.add('hidden'); input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); c.active = -1; };
  c.close = close;
  const render = () => {
-  list.innerHTML = c.items.length ? c.items.map((r, i) => '<div role="option" id="' + which + '-opt-' + i + '" data-i="' + i + '" aria-selected="' + (i === c.active) + '"><strong>' + esc(r.name) + '</strong><small>' + esc(r.address) + '</small></div>').join('')
-   : '<div class="empty">No matches. Try a six-digit postal code, a building name or a street.</div>';
+  const tag = r => r.source === 'lta' ? ' <span class="opt-tag">Official station data</span>' : r.approximate ? ' <span class="opt-tag warn">Approximate: street or area</span>' : '';
+  list.innerHTML = c.items.length ? c.items.map((r, i) => '<div role="option" id="' + which + '-opt-' + i + '" data-i="' + i + '" aria-selected="' + (i === c.active) + '"><strong>' + esc(r.name) + '</strong><small>' + esc(r.address) + '</small>' + tag(r) + '</div>').join('')
+   : '<div class="empty">' + esc(c.message || 'No matches. Try a six-digit postal code, a building name or a street.') + '</div>';
   if (c.active >= 0) { input.setAttribute('aria-activedescendant', which + '-opt-' + c.active); $(which + '-opt-' + c.active)?.scrollIntoView({block: 'nearest'}); }
   else input.removeAttribute('aria-activedescendant');
   open();
  };
  const choose = r => { close(); selectPlace(which, r); };
- const run = async () => {
+ // mode 'suggest' = as you type (Photon + official station list); 'submit' = explicit search (adds the backup service).
+ const run = async (mode = 'suggest') => {
   const q = input.value.trim(); if (q.length < 3) { close(); return; }
   const seq = ++c.seq; input.setAttribute('aria-busy', 'true');
+  if (c.ctrl) c.ctrl.abort(); c.ctrl = new AbortController(); // cancel the previous in-flight suggestion request
+  if (mode === 'submit') $('address-status').textContent = 'Searching…';
   try {
-   const data = await P.search(q);
+   const data = await P.search(q, {mode, signal: c.ctrl.signal});
    if (seq !== c.seq) return;
-   c.items = data.results || []; c.active = -1; render();
-   $('address-status').textContent = c.items.length ? plural(c.items.length, 'suggestion', 'suggestions') + ' below the field. Use the down arrow key, or swipe right with a screen reader, to review them.' : 'No matches found. Try a six-digit postal code or a building name.';
-  } catch (e) { if (seq !== c.seq) return; close(); $('address-status').textContent = 'Address search unavailable: ' + e.message; }
-  finally { if (seq === c.seq) input.removeAttribute('aria-busy'); }
+   c.items = data.results || []; c.active = -1; c.status = data.status; c.message = data.message || ''; render();
+   const count = c.items.length, approx = c.items.some(r => r.approximate);
+   const hint = ' Use the down arrow key, or swipe right with a screen reader, to review them.';
+   $('address-status').textContent =
+    data.status === 'unavailable' ? data.message :
+    !count ? (data.status === 'degraded' ? data.message : 'No matches found. Try a six-digit postal code, a building name or a street.') :
+    (data.status === 'fallback' ? plural(count, 'result', 'results') + ' from the backup search.' : data.status === 'degraded' ? data.message + ' ' + plural(count, 'station match', 'station matches') + ' below.' : plural(count, 'suggestion', 'suggestions') + ' below the field.') +
+    (approx ? ' Some are approximate (a street or area).' : '') + hint;
+  } catch (e) {
+   if (seq !== c.seq || e.kind === 'aborted') return;
+   close(); $('address-status').textContent = e.message;
+  } finally { if (seq === c.seq) input.removeAttribute('aria-busy'); }
  };
  c.run = run;
  input.addEventListener('input', () => {
@@ -305,7 +336,11 @@ function setupCombo(which) {
   const isOpen = !list.classList.contains('hidden') && c.items.length;
   if (e.key === 'ArrowDown') { e.preventDefault(); if (!c.items.length) return; c.active = Math.min(c.active + 1, c.items.length - 1); render(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); if (!isOpen) return; c.active = Math.max(c.active - 1, -1); render(); }
-  else if (e.key === 'Enter') { e.preventDefault(); if (isOpen) choose(c.items[Math.max(c.active, 0)]); else { clearTimeout(c.timer); run(); } }
+  else if (e.key === 'Enter') {
+   e.preventDefault(); clearTimeout(c.timer);
+   if (isOpen && (c.active >= 0 || c.status === 'ok' || c.status === 'fallback')) choose(c.items[Math.max(c.active, 0)]);
+   else run('submit'); // explicit search: may use the backup service
+  }
   else if (e.key === 'Escape') { if (!list.classList.contains('hidden')) { e.stopPropagation(); close(); } }
  });
  input.addEventListener('blur', () => setTimeout(close, 160));
@@ -316,9 +351,13 @@ setupCombo('start'); setupCombo('end');
 
 function selectPlace(which, r, {plan = true} = {}) {
  const p = {name: r.name || r.address || 'Selected place', address: r.address || '', lat: Number(r.lat), lng: Number(r.lng)};
+ if (r.station) p.station = r.station; if (r.exit) p.exit = r.exit; if (r.base) p.base = r.base;
+ if (r.exit && !r.base) p.base = {name: r.station, address: '', station: r.station, lat: p.lat, lng: p.lng}; // station centre unknown here; refined below
  if (!inSG(p)) { toast('That place is outside Singapore.'); return; }
- state[which] = p; $(which + '-search').value = p.name;
+ state[which] = p; $(which + '-search').value = p.name; state.exclude = [];
  clearRoutes(); drawMarkers();
+ if (p.station) P.loadExits().then(d => { const st = d.byName.get(p.station.toLowerCase()); if (st && p.base && p.exit) Object.assign(p.base, {lat: st.lat, lng: st.lng}); renderEntrances(); }).catch(() => {});
+ else { detectStation(which); renderEntrances(); }
  $('address-status').textContent = (which === 'start' ? 'Start' : 'Destination') + ': ' + p.name + (p.address ? ', ' + p.address : '') + '.';
  voiceOnly($('address-status').textContent);
  updateSummary();
@@ -367,37 +406,63 @@ $('gps-start').addEventListener('click', async () => {
 
 /* ------------------------------------------------------------ routing */
 function clearRoutes() {
- state.routes = []; state.selected = 0; app.classList.remove('has-route');
+ state.routes = []; state.selected = 0; state.summaries = []; state.userPicked = false; summaryRun++; app.classList.remove('has-route');
  refreshJourneyRoute(); renderRoutes(); drawRoutes(false);
 }
 function recommendIndex(routes) {
  const p = state.prefs, physical = p.stepfree || p.avoidstairs;
- const score = r => (p.stepfree && r.profile !== 'wheelchair' ? 1e6 : 0) + (physical ? r.counts.stairs * 1e4 : 0) +
-  (p.shorter ? r.distance_m : 0) + (p.simpler ? r.steps.length * 60 : 0) + r.duration_s / 10;
- let best = 0; routes.forEach((r, i) => { if (score(r) < score(routes[best])) best = i; }); return best;
+ const met = i => (state.summaries[i] && state.summaries[i].metrics) || {};
+ const score = (r, i) => { const m = met(i), stairs = m.stairs ?? r.counts.stairs, cross = m.crossings ?? r.counts.crossing;
+  return (p.stepfree && r.profile !== 'wheelchair' ? 1e6 : 0) + (physical ? stairs * 1e4 : 0) + (p.shorter ? r.distance_m : 0) + (p.simpler ? r.steps.length * 60 : 0) +
+   (p.fewercrossings ? cross * 300 : 0) + (p.avoidroads ? (m.roadside || 0) * 3 : 0) - (p.shelter ? (m.underpass || 0) * 2 : 0) + r.duration_s / 10; };
+ let best = 0; routes.forEach((r, i) => { if (score(r, i) < score(routes[best], best)) best = i; }); return best;
+}
+const routePrefsOn = () => ['stepfree', 'avoidstairs', 'shorter', 'simpler', 'fewercrossings', 'avoidroads', 'shelter'].some(k => state.prefs[k]);
+
+/* Journey Accessibility Summary: loaded after the routes appear (one extra, throttled Valhalla request per route). */
+let summaryRun = 0;
+async function loadSummaries() {
+ const run = ++summaryRun, routes = state.routes;
+ const reports = await reportStore.list().catch(() => []);
+ const exitsMeta = await P.loadExits().then(d => d.meta).catch(() => null);
+ for (let i = 0; i < routes.length; i++) {
+  if (routes[i].illustrative) continue;
+  let details = null; try { details = await P.routeDetails(routes[i]); } catch { details = null; }
+  if (run !== summaryRun || state.routes !== routes) return; // routes changed meanwhile: never attach old details to new routes
+  state.summaries[i] = Access.summarise(routes[i], details, {start: state.start, end: state.end, reports, exitsMeta});
+  renderRoutes(); updateSummary();
+ }
+ if (run !== summaryRun) return;
+ if (!state.userPicked && routes.length > 1) { const rec = recommendIndex(routes); if (rec !== state.selected) { state.selected = rec; refreshJourneyRoute(); renderRoutes(); drawRoutes(false); } }
+ const spokenParts = routes.map((r, i) => state.summaries[i] && !state.summaries[i].loading ? Access.spoken(state.summaries[i], 'Option ' + (i + 1)) : '').filter(Boolean);
+ if (!spokenParts.length) return;
+ if (state.audioMode || autoSpeak()) notify('Accessibility details ready. ' + spokenParts.join(' '), {key: 'acc' + run});
+ else speaker.announce('Accessibility details are ready for ' + plural(spokenParts.length, 'route', 'routes') + '.');
 }
 async function planRoutes() {
  if (!state.start || !state.end) { toast('Choose a start and a destination first.'); (state.start ? $('end-search') : $('start-search')).focus(); return; }
  if (state.start.lat === state.end.lat && state.start.lng === state.end.lng) { toast('Start and destination are the same place.'); return; }
- const btn = $('plan'); state.planning = true;
+ const btn = $('plan'); state.planning = true; summaryRun++; // cancel any details still loading for the previous routes
  btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Finding routes…';
  $('routes').setAttribute('aria-busy', 'true'); $('routes').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
  setSheet('half');
  try {
-  const data = await P.compareRoutes(state.start, state.end, {preferLifts: !!state.prefs.lifts});
-  state.routes = data.routes; state.selected = recommendIndex(state.routes);
+  const data = await P.compareRoutes(state.start, state.end, {preferLifts: !!state.prefs.lifts, exclude: state.exclude});
+  state.routes = data.routes; state.summaries = data.routes.map(() => ({loading: true})); state.userPicked = false; state.selected = recommendIndex(state.routes);
   app.classList.add('has-route');
   const r = state.routes[state.selected];
   const msg = plural(state.routes.length, 'route', 'routes') + ' found. Suggested: ' + r.label + ', ' + fmtTime(r.duration_s) + ', ' + fmtDist(r.distance_m) + '. Accessibility not verified.';
   notify(A.compareSummary(state.routes, state.selected, recommendIndex(state.routes))); buzz(60);
   if (!matchMedia('(min-width: 600px)').matches) setSheet('peek');
+  if (!state.audioMode) $('sheet-content').scrollTop = 0; // collapsed sheet shows Start + the new route, not where you last scrolled
  } catch (e) {
   state.routes = [illustrative()]; state.selected = 0;
   toast('Routing unavailable: ' + e.message, true); notify('Routing unavailable. ' + e.message + ' A straight-line illustration is shown instead; it is not a walking route.', {priority: 'high', key: 'route-fail'});
  } finally {
   state.planning = false; btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = 'Get walking directions';
   $('routes').removeAttribute('aria-busy');
-  refreshJourneyRoute(); renderRoutes(); drawRoutes();
+  refreshJourneyRoute(); renderRoutes(); drawRoutes(); renderAvoid();
+  if (state.routes.length && !state.routes[0].illustrative) loadSummaries();
  }
 }
 function illustrative() {
@@ -407,33 +472,113 @@ function illustrative() {
 }
 $('plan').addEventListener('click', planRoutes);
 
+const CONF_ICON = {verified: '✓', community: '', report: '⚑', unknown: '?'}; // community = CSS half-filled circle
+const confBadge = c => '<span class="conf c-' + c + '"><span class="ci" aria-hidden="true">' + CONF_ICON[c] + '</span> ' + Access.CONFIDENCE[c].label + '</span>';
 function renderRoutes() {
  const box = $('routes');
  const rec = state.routes.length > 1 ? recommendIndex(state.routes) : 0;
- const physical = state.prefs.stepfree || state.prefs.avoidstairs || state.prefs.shorter || state.prefs.simpler;
+ const physical = routePrefsOn();
  if (!state.routes.length) {
   box.innerHTML = state.planning ? box.innerHTML : '<p class="notice">' + (state.start || state.end ? 'Choose both a start and a destination.' : 'Search for a start and a destination above, or try a sample journey.') + '</p>';
   $('route-source').textContent = 'Awaiting addresses';
   renderDetails(); return;
  }
+ const openDetails = new Set(qs('.access-details[open]', box).map(d => d.dataset.i));
  const first = state.routes[0];
- $('route-source').textContent = first.illustrative ? 'Offline illustration' : first.provider === 'onemap' ? 'OneMap' : 'OpenStreetMap data';
+ $('route-source').textContent = first.illustrative ? 'Offline illustration' : 'OpenStreetMap data';
+ const legend = first.illustrative ? '' : '<details class="conf-legend"><summary>What the labels mean</summary><ul class="plain small">' +
+  Object.entries(Access.CONFIDENCE).map(([k, v]) => '<li>' + confBadge(k) + ' ' + esc(v.long) + '</li>').join('') +
+  '<li>No overall accessibility score is given: there’s no validated way to combine these.</li></ul></details>';
  box.innerHTML = state.routes.map((r, i) => {
-  const c = r.counts, meta = r.illustrative ? ['Straight line ' + fmtDist(r.distance_m)] :
-   [fmtDist(r.distance_m), plural(c.stairs, 'stair section', 'stair sections'), plural(c.elevator, 'lift', 'lifts'), plural(c.crossing, 'crossing', 'crossings')];
+  const sm = state.summaries[i], ready = sm && !sm.loading;
   const tag = state.routes.length > 1 && i === rec ? '<span class="tag">' + (physical ? 'Best match' : 'Fastest') + '</span>' : '';
   const warn = (r.warnings || []).map(w => '<div class="warn">' + esc(w) + '</div>').join('');
-  const name = A.routeSummary(r, i) + (tag ? ' ' + (physical ? 'Best match for your needs.' : 'Fastest.') : '') + ' ' + (r.warnings || []).join(' ') + (r.illustrative ? '' : ' Not verified as accessible.');
-  return '<button type="button" class="route-card" data-route="' + i + '" aria-pressed="' + (i === state.selected) + '" aria-label="' + esc(name) + '">' +
+  const chipsHtml = r.illustrative ? '' : !ready ? '<span class="achips"><span class="achip loading">Checking accessibility details…</span></span>' :
+   '<span class="achips">' + sm.headline.map(it => { const t = Access.chip(it); return t ? '<span class="achip c-' + it.confidence + (it.flag ? ' flag' : '') + '">' + esc(t) + '</span>' : ''; }).join('') + '</span>';
+  const name = A.routeSummary(r, i) + (tag ? ' ' + (physical ? 'Best match for your needs.' : 'Fastest.') : '') + ' ' + (ready ? sm.headline.map(Access.chip).filter(Boolean).join(', ') + '.' : '') + ' ' + (r.warnings || []).join(' ') + (r.illustrative ? '' : ' Not verified as accessible.');
+  const other = state.routes.length > 1 ? (i === 0 ? 1 : 0) : -1;
+  const trade = ready && other >= 0 && i === state.selected && state.summaries[other] && !state.summaries[other].loading ? Access.compare(sm, state.summaries[other], r, state.routes[other]) : '';
+  const details = ready ? '<details class="access-details" data-i="' + i + '"' + (openDetails.has(String(i)) ? ' open' : '') + '><summary>Accessibility details</summary><ul class="access-list">' +
+   sm.items.map(it => '<li>' + confBadge(it.confidence) + '<span><strong>' + esc(it.label) + '.</strong> ' + esc(it.text) + '.</span></li>').join('') +
+   '</ul><p class="source small muted">' + esc(sm.source) + '.</p><button type="button" class="btn read-access" data-i="' + i + '"><svg class="icon" aria-hidden="true"><use href="#i-speaker"/></svg>Read details aloud</button></details>' : '';
+  return '<div class="route-item"><button type="button" class="route-card" data-route="' + i + '" aria-pressed="' + (i === state.selected) + '" aria-label="' + esc(name) + '">' +
    '<span class="top"><span class="label">' + esc(r.label) + '<span class="selected-mark" aria-hidden="true">✓ Selected</span></span><span class="time">' + (r.illustrative ? '—' : esc(fmtTime(r.duration_s))) + '</span></span>' +
-   '<span class="meta">' + meta.map(m => '<span>' + esc(m) + '</span>').join('') + '</span>' +
-   (r.illustrative ? '' : '<span class="meta note"><span>' + esc(r.note) + ' Stairs and lifts counted from map data.</span></span>') + tag + warn + '</button>';
- }).join('');
+   '<span class="meta"><span>' + esc(r.illustrative ? 'Straight line ' + fmtDist(r.distance_m) : fmtDist(r.distance_m)) + '</span>' + (tag ? tag : '') + '</span>' + chipsHtml +
+   (r.illustrative ? '' : '<span class="meta note"><span>' + esc(r.note) + '</span></span>') + warn + '</button>' +
+   (trade ? '<p class="tradeoff small">' + esc(trade) + '</p>' : '') + details + '</div>';
+ }).join('') + legend + (first.illustrative ? '<button type="button" class="btn" id="retry-route">Try routing again</button>' : '');
  qs('[data-route]', box).forEach(b => b.addEventListener('click', () => {
-  state.selected = Number(b.dataset.route); refreshJourneyRoute(); renderRoutes(); drawRoutes();
-  const r = state.routes[state.selected]; notify('Selected. ' + A.routeSummary(r), {key: 'sel' + Date.now()});
+  state.selected = Number(b.dataset.route); state.userPicked = true; refreshJourneyRoute(); renderRoutes(); drawRoutes(); renderAvoid();
+  const r = state.routes[state.selected], sm = state.summaries[state.selected];
+  notify('Selected. ' + A.routeSummary(r) + (sm && !sm.loading ? ' ' + Access.spoken(sm) : ''), {key: 'sel' + Date.now()});
  }));
+ qs('.read-access', box).forEach(b => b.addEventListener('click', () => { const i = Number(b.dataset.i); speak(Access.spoken(state.summaries[i], 'Option ' + (i + 1) + ', ' + state.routes[i].label, {full: true}), true); }));
+ $('retry-route')?.addEventListener('click', planRoutes);
  renderDetails();
+}
+
+/* Station exits: official LTA exit locations; choose one as the precise start or arrival point. */
+async function detectStation(which) {
+ const p = state[which]; if (!p || p.station) return;
+ if (!/\b(MRT|LRT)\b|station/i.test(p.name)) return;
+ const near = await P.nearbyStations(p, 300);
+ const word = p.name.toLowerCase().split(/[\s,]+/)[0];
+ const st = near.find(s => s.name.toLowerCase().startsWith(word)) || (near.length === 1 ? near[0] : null);
+ if (st && state[which] === p) { p.station = st.name; renderEntrances(); }
+}
+async function renderEntrances() {
+ const box = $('entrances'), parts = [];
+ let data = null; try { data = await P.loadExits(); } catch { data = null; }
+ for (const which of ['start', 'end']) {
+  const p = state[which]; if (!data || !p || !p.station) continue;
+  const st = data.byName.get(p.station.toLowerCase()); if (!st) continue;
+  const other = state[which === 'start' ? 'end' : 'start'];
+  const exits = st.exits.map(e => ({...e, d: other ? P.metresApprox(e, other) : null}));
+  if (other) exits.sort((a, b) => a.d - b.d);
+  const btn = e => '<button type="button" class="chip" data-exit-which="' + which + '" data-exit="' + esc(e.exit) + '" aria-pressed="' + (p.exit === e.exit) + '">' + esc(e.exit) +
+   (e.d != null ? '<small> · ' + esc(fmtDist(e.d)) + '</small>' : '') + '</button>';
+  parts.push('<div class="exit-group" role="group" aria-labelledby="exits-' + which + '"><p class="exit-title" id="exits-' + which + '">' + (which === 'start' ? 'Leaving from ' : 'Arriving at ') + '<strong>' + esc(st.name) + '</strong>' +
+   (other ? ' <span class="muted">· distance ' + (which === 'start' ? 'to your destination' : 'from your start') + '</span>' : '') + '</p><div class="chips">' +
+   '<button type="button" class="chip" data-exit-which="' + which + '" data-exit="" aria-pressed="' + !p.exit + '">Station centre</button>' + exits.slice(0, 6).map(btn).join('') + '</div>' +
+   (exits.length > 6 ? '<details class="more-exits"><summary>All ' + exits.length + ' exits</summary><div class="chips">' + exits.slice(6).map(btn).join('') + '</div></details>' : '') + '</div>');
+ }
+ box.classList.toggle('hidden', !parts.length);
+ $('rec-exit').classList.toggle('hidden', !parts.length);
+ if (!parts.length) { box.innerHTML = ''; drawExits(); return; }
+ box.innerHTML = '<h3 class="h3" id="entrances-heading">Station exits</h3><p class="small muted">' + confBadge('verified') + ' Exit locations from LTA (updated ' + esc(data.meta.updated) + '). Which exits have lifts or step-free access isn’t in open data: check station signs or ask staff. Distances are straight-line.</p>' + parts.join('');
+ qs('[data-exit-which]', box).forEach(b => b.addEventListener('click', () => chooseExit(b.dataset.exitWhich, b.dataset.exit)));
+ drawExits();
+}
+async function chooseExit(which, exitName) {
+ const cur = state[which]; if (!cur) return;
+ const base = cur.base || cur, data = await P.loadExits();
+ const st = data.byName.get(base.station.toLowerCase());
+ const e = exitName && st.exits.find(x => x.exit === exitName);
+ state[which] = e ? {name: st.name + ', ' + e.exit, address: 'Official LTA exit location', lat: e.lat, lng: e.lng, station: st.name, exit: e.exit, base} : {...base};
+ $(which + '-search').value = state[which].name;
+ state.exclude = [];
+ drawMarkers(); renderEntrances(); updateSummary();
+ const msg = e ? (which === 'start' ? 'Starting from ' : 'Arriving at ') + st.name + ' ' + e.exit + '. Lift or step-free access at this exit isn’t in open data.' : 'Using the station centre.';
+ $('address-status').textContent = msg; voiceOnly(msg);
+ if (state.start && state.end) planRoutes();
+}
+
+/* "Something changed?" — avoid a specific lift, stair or crossing on the route and look for another way. */
+function renderAvoid() {
+ const r = state.routes[state.selected], list = $('avoid-list');
+ const LABEL = {elevator: 'Lift', stairs: 'Stairs', escalator: 'Escalator', crossing: 'Crossing'};
+ const items = r && !r.illustrative ? r.steps.map((s, i) => ({s, i})).filter(({s}) => LABEL[s.kind] && s.shape_index != null) : [];
+ list.innerHTML = (state.exclude.length ? '<p class="small">Avoiding ' + plural(state.exclude.length, 'point', 'points') + '. <button type="button" class="btn" id="clear-avoid">Stop avoiding</button></p>' : '') +
+  (items.length ? '<p class="small muted">If a lift is out of service or a way is blocked, choose it to look for routes that avoid it. Pathway can’t confirm the new route is accessible.</p><div class="chips">' +
+   items.map(({s, i}) => '<button type="button" class="chip" data-avoid="' + i + '">Avoid ' + esc(LABEL[s.kind].toLowerCase()) + ' (step ' + (i + 1) + ')</button>').join('') + '</div>' :
+   '<p class="small muted">No lifts, stairs or crossings listed in the directions for this route.</p>');
+ qs('[data-avoid]', list).forEach(b => b.addEventListener('click', () => {
+  const s = r.steps[Number(b.dataset.avoid)], pt = r.geometry[Math.min(s.shape_index + 1, r.geometry.length - 1)];
+  state.exclude.push({lat: pt[0], lng: pt[1]});
+  notify('Looking for routes that avoid that ' + LABEL[s.kind].toLowerCase() + '. Pathway can’t confirm the new route is accessible.', {key: 'avoid' + Date.now()});
+  planRoutes();
+ }));
+ $('clear-avoid')?.addEventListener('click', () => { state.exclude = []; planRoutes(); });
 }
 function renderCta() {
  const ready = state.routes.length && !state.routes[state.selected]?.illustrative;
@@ -473,6 +618,8 @@ function updateSummary() {
  $('sum-from').textContent = state.start ? state.start.name : 'Not chosen';
  $('sum-to').textContent = state.end ? state.end.name : 'Not chosen';
  $('sum-route').textContent = r ? (r.illustrative ? 'No walking route available' : r.label + ', about ' + fmtTime(r.duration_s) + ', ' + fmtDist(r.distance_m)) : 'None yet';
+ const sm = state.summaries[state.selected];
+ $('sum-access').textContent = !r || r.illustrative ? '—' : !sm || sm.loading ? 'Checking…' : sm.headline.map(Access.chip).filter(Boolean).join(' · ') + ' (map data; not verified)';
 }
 function highlightStep(i) { qs('#steps li').forEach(li => li.classList.toggle('current', Number(li.dataset.step) === i)); }
 function updateJourney() {
@@ -500,7 +647,10 @@ function updateJourney() {
  set(v.badge, v.message, v.pct, v.tone);
  if (!guide.active) return;
  highlightStep(v.stepIdx);
- for (const e of v.events) { notify(e.text, {priority: e.priority || 'normal', key: e.key}); if (e.vibrate) buzz(e.vibrate); }
+ for (const e of v.events) {
+  if (e.key === 'off') $('recovery').open = true; // offer recovery options when the person may be off route
+  notify(e.text, {priority: e.priority || 'normal', key: e.key}); if (e.vibrate) buzz(e.vibrate);
+ }
 }
 function gpsUpdate(p) {
  const lat = p.coords.latitude, lng = p.coords.longitude; if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -554,6 +704,15 @@ function setPause(on) {
  b.querySelector('use').setAttribute('href', on ? '#i-play' : '#i-pause');
 }
 $('guide-start').addEventListener('click', startGuidance);
+$('rec-exit').addEventListener('click', () => { setSheet('full'); $('entrances').scrollIntoView({block: 'start'}); const f = $('entrances').querySelector('[data-exit-which]'); if (f) f.focus(); });
+$('rec-compare').addEventListener('click', () => {
+ if (!state.routes.length) return speak('No routes loaded yet. Choose a start and a destination.', true);
+ setSheet('half'); $('routes-heading').scrollIntoView({block: 'start'});
+ const parts = state.routes.map((r, i) => A.routeSummary(r, i) + (state.summaries[i] && !state.summaries[i].loading ? ' ' + Access.spoken(state.summaries[i]) : ''));
+ speak(parts.join(' ') + ' Choose an option in the route list.', true);
+});
+$('rec-report').addEventListener('click', () => { openModal(); if (lastGPS) $('report-pin').value = 'gps'; });
+$('rec-overview').addEventListener('click', () => { $('recovery').open = false; setSheet('half'); $('journey-summary').scrollIntoView({block: 'start'}); $('journey-heading').setAttribute('tabindex', '-1'); $('journey-heading').focus(); });
 $('cta-start').addEventListener('click', () => { startGuidance(); if (!matchMedia('(min-width: 900px)').matches) setSheet('half'); $('journey-preview').scrollIntoView({block: 'start', behavior: reducedMotion ? 'auto' : 'smooth'}); });
 $('guide-stop').addEventListener('click', () => stopGuidance());
 $('guide-pause').addEventListener('click', () => {
@@ -705,7 +864,7 @@ function togglePref(k, value) {
  state.prefs[k] = value ?? !state.prefs[k]; save();
  qs('[data-pref="' + k + '"]').forEach(b => b.setAttribute('aria-pressed', String(!!state.prefs[k])));
  applyDisplay();
- if (state.routes.length > 1 && ['stepfree', 'avoidstairs', 'shorter', 'simpler'].includes(k)) { state.selected = recommendIndex(state.routes); refreshJourneyRoute(); renderRoutes(); drawRoutes(false); }
+ if (state.routes.length > 1 && ['stepfree', 'avoidstairs', 'shorter', 'simpler', 'fewercrossings', 'avoidroads', 'shelter'].includes(k)) { state.selected = recommendIndex(state.routes); refreshJourneyRoute(); renderRoutes(); drawRoutes(false); }
  else if (k === 'simple') { renderDetails(); refreshJourneyRoute(); }
  syncVoiceSettings();
  if (k === 'lifts' && state.routes.length && !state.routes[0].illustrative) planRoutes();

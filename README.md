@@ -22,6 +22,10 @@ Pathway is designed with a broad range of people in mind, including wheelchair u
 
 - **Singapore address-to-address planning.** Search for addresses, postal codes, buildings, and landmarks; choose a start and destination; or use your current GPS location.
 - **Compare walking options.** View a standard walking route alongside a wheelchair-profile route designed to avoid steps that are recorded in OpenStreetMap data. Both are computed, not independently verified.
+- **Journey Accessibility Summary.** Every route shows what map data records, from stairs and lifts to road crossings, roads without a footway, underground or indoor sections and unpaved surfaces. Each item carries a confidence label (*Official*, *Map data*, *Report* or *Unknown*), and a plain trade-off line compares the routes. Unknowns such as lift status, kerbs, slopes, covered linkways and seating are listed, never hidden. There's no made-up accessibility score.
+- **Choose an MRT exit.** Official LTA exit locations let you start or end at a specific exit. Which exits have lifts isn't in open data, and Pathway says so.
+- **Search that keeps working.** Official MRT stations are always searchable. Suggestions back off when the search service is busy, and an explicit search falls back to OpenStreetMap Nominatim.
+- **When something changes.** Reroute from your position, compare options, choose another exit, report a barrier, or **avoid a specific lift, stairs or crossing** and get routes around it.
 - **Understand the journey.** See estimated walking times, distances, route geometry, and directions, with available map observations about stairs, lifts, and crossings.
 - **Personalise the experience.** Explore accessibility preferences and presentation options, including larger text, high contrast, spoken updates, and simplified directions.
 - **Plan and follow a journey without the map.** *Audio mode* is built for blind and low-vision people. It hides the map, uses one readable column with large Start, Pause, Repeat and Stop controls, and reads concise updates:
@@ -69,6 +73,7 @@ The website source lives in [`public/`](public/), with design and research notes
 | [Audio mode and nonvisual planning](docs/audio-navigation.md) | How audio guidance works, what is spoken and when, and testing status |
 | [Map performance](docs/performance.md) | Root cause of slow map loading, before/after measurements, third-party limits |
 | [Visual assistance research](docs/visual-assistance.md) | Camera, OCR and AI options, privacy rules, and the experimental sign reader |
+| [Journey accessibility](docs/journey-accessibility.md) | Journey Accessibility Summary, confidence labels, station exits, search reliability, recovery, scenario testing |
 | [Deployment](docs/deployment.md) | GitHub Pages workflow, the artifact failure root cause, service-worker updates |
 | [Future backend](docs/future-backend.md) | What a production-ready data and moderation architecture would require |
 
