@@ -24,7 +24,7 @@ In audio mode:
 2. **Route options:** each option is a toggle button with a short spoken label. For example: *"Option 1: Wheelchair-profile route, about 19 minutes, 1.1 kilometres, no stair sections and no lifts recorded in map data. Best match for your needs. Not verified as accessible."* When routes load, a one-sentence comparison of all options is announced.
 3. **Journey guidance** (the same panel is used in visual mode). The controls are always in this order:
    - **Start guidance:** speaks a short summary with its limitations, then the first instruction. Starts GPS and, if allowed, keeps the screen on.
-   - **Pause voice / Resume voice:** silences automatic speech; GPS progress continues on screen.
+   - **Pause voice** (a toggle button, `aria-pressed`; visible label *Pause* / *Paused*): silences automatic speech; GPS progress continues on screen.
    - **Repeat:** speaks the latest instruction and the remaining distance, even when paused.
    - **Stop:** ends GPS and speech.
 

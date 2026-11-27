@@ -57,6 +57,10 @@ MAPSTYLE=liberty ONLY=mobile node tests/perf.js 2   # force a basemap or a profi
 | | Map data downloaded | 2,543 KB | 605 KB |
 | | Repeat visit, map loaded | 1.8–1.9 s | 1.1–1.2 s |
 
+**After the compact redesign** (same method, mobile, median of 3): search usable 0.72 s, map loaded 4.8 s, repeat-visit map 1.05 s. The performance gains are unchanged.
+
+**Map style switching** reuses the single map instance; the browser test checks that the map is created exactly once. Styles are applied with `setStyle(…, {diff: false})`. The default "diff" mode silently dropped the route and report layers, because it doesn't fire `style.load`. That was a bug, now fixed.
+
 The desktop map time barely changed in this test environment because every OneMap tile request took about 1 s to reach the test machine, which is outside Singapore. Phones and computers in Singapore should see much shorter tile times, but that wasn't measured. **Re-run `tests/perf.js` against the live URL after deployment** to confirm the numbers on GitHub Pages.
 
 ## Third-party limits

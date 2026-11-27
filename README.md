@@ -69,6 +69,7 @@ The website source lives in [`public/`](public/), with design and research notes
 | [Audio mode and nonvisual planning](docs/audio-navigation.md) | How audio guidance works, what is spoken and when, and testing status |
 | [Map performance](docs/performance.md) | Root cause of slow map loading, before/after measurements, third-party limits |
 | [Visual assistance research](docs/visual-assistance.md) | Camera, OCR and AI options, privacy rules, and the experimental sign reader |
+| [Deployment](docs/deployment.md) | GitHub Pages workflow, the artifact failure root cause, service-worker updates |
 | [Future backend](docs/future-backend.md) | What a production-ready data and moderation architecture would require |
 
 ### Run locally
@@ -89,7 +90,7 @@ Unit tests (no network, no dependencies):
 node --test tests/*.test.js
 ```
 
-End-to-end browser test, with a local site running. It needs Playwright and calls the live search and routing services:
+End-to-end browser test, with a local site running. It needs Playwright. Routing is live; search uses recorded Photon-format responses unless you set `LIVE_SEARCH=1`:
 
 ```bash
 node tests/e2e.js

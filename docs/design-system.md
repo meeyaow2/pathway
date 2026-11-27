@@ -65,6 +65,33 @@ Weights are 400, 550, 650 and 750, and line height is 1.45. **Larger text** sets
   - `--shadow-2`: floating cards and map buttons
   - `--shadow-sheet`: the bottom sheet
 
+## Density and touch targets (compact layout)
+Pathway is designed to be compact without being cramped. **Visible size and touch size are separate decisions.**
+
+| Control | Visible | Touch target | How |
+|---|---|---|---|
+| Search rows, icon buttons, primary/secondary buttons, tab bar items | 44px | 44px | `--tap: 44px` |
+| Map buttons (FAB) | 40px circle | 44px | 2px transparent border with `background-clip: padding-box` |
+| Sheet handle | 4px grip in a 32px bar | 44px | `::after` extends the hit area |
+| Audio mode toggle, sample-journey chips | 32px pill | 44px tall | `::before` extends the hit area vertically |
+| Preference chips | 40px | 40px (spaced 6px) | Secondary toggles; well above the WCAG 2.2 24px minimum |
+| Checkboxes and radios | 24px | Whole label row (44px) | `.check` labels |
+
+- **Type scale in the sheet:** body 15px, metadata 13px, chip text 14px, section headings 15px. Inputs stay **16px**, so iOS doesn't zoom into them.
+- **Larger text** raises the root to 19px and everything scales; checked at 320px wide with no overflow or overlap.
+- **Search card:** From and To are one grouped field with a divider (one border, not two). The focused row gets a purple left bar.
+- **Bottom sheet:**
+  - *Collapsed:* journey summary only. Before any places are chosen, a one-line hint; with a route, **Start guidance** and the selected route.
+  - *Half or full:* route comparison, guidance controls, directions, preferences.
+  - Toggle with the handle button (`aria-expanded`) or drag it.
+- **Preferences** are grouped by what they do, and the status is stated **once per group**, not under every chip:
+  - *Route suggestions* (Changes routes) are always visible.
+  - *Display and alerts* (Changes display) are in a collapsed section.
+  - *Not available yet* (Not applied yet) are in a collapsed section with a dashed status key.
+  - Each group is a `role=group` labelled by its title and description, so screen readers hear the status when entering it.
+  - Unsupported options (e.g. vibration on iPhone) use the dashed **disabled** chip state (`aria-disabled`) with a reason.
+- **Map controls:** on phones, a row just above the sheet, clear of the search card and map attribution. On wider screens, a column at the bottom right. Overlap is checked automatically at 320–1440px.
+
 ## Components
 
 | Component | Anatomy and states | Accessibility |
@@ -75,7 +102,7 @@ Weights are 400, 550, 650 and 750, and line height is 1.45. **Larger text** sets
 | **Search field** `.field-row` | Label (dot + "From"/"To"), input, action. Focus = purple border + glow | `role="combobox"`, `aria-activedescendant`, results in a listbox |
 | **Suggestion** `[role=option]` | Active = soft purple + 4px purple left bar | Arrow keys, Enter, Escape |
 | **Route card** `.route-card` | A line swatch matching the map, title, duration, distance, stairs/lift/crossing counts, explanation, "★ Best match" tag. Selected = 2px purple border, soft-purple fill, "✓ Selected" | `aria-pressed`; selection is announced |
-| **Preference chip** `.chip` | Name + status line (*Changes routes* / *Changes display* / *Data needed, not applied yet*). Selected = purple fill + ✓ | `aria-pressed`; the status is part of the accessible name |
+| **Preference chip** `.chip` | Single-line label inside a status group. Selected = purple fill + ✓; disabled = dashed outline on a sunken background | `aria-pressed`; the group label carries the status |
 | **Status flag** `.flag` | Amber + "!" = caution/unverified; purple + ✓ = ok; red + "!" = alert | Text always present |
 | **Callout** `.callout` | Amber panel for safety and verification messages | — |
 | **Bottom sheet** `.sheet` | Grip handle and three heights: peek (190px, or 236px with a route), half, full. Becomes a floating card from 600px and a side panel from 900px | The handle is a button with `aria-expanded`; drag or tap |

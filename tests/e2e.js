@@ -8,6 +8,25 @@ const URL_ = process.env.PATHWAY_URL || 'http://127.0.0.1:8765/pathway/';
 const OUT = process.env.SHOT_DIR || path.join(__dirname, 'screenshots');
 const AXE = process.env.AXE_PATH;
 const results = []; const ok = (name, pass, info = '') => { results.push({name, pass, info}); console.log((pass ? 'PASS ' : 'FAIL ') + name + (info ? ' — ' + info : '')); };
+const PLACES = [
+  ['Orchard MRT Station', 'Orchard Road', '238872', 1.30425, 103.83206], ['Orchard', '', '', 1.3048, 103.8318],
+  ['Somerset MRT Station', 'Orchard Road', '238885', 1.30062, 103.83864], ['Paragon', 'Orchard Road', '238859', 1.3035, 103.8355], ['Paragon Medical Suites', 'Orchard Road', '238859', 1.3037, 103.8357],
+];
+async function photonFixture(route) {
+  const u = new URL(route.request().url()), q = (u.searchParams.get('q') || '').toLowerCase();
+  const words = q.split(/\s+/).filter(w => w.length > 2), score = n => words.filter(w => n.toLowerCase().includes(w)).length;
+  const pick = u.pathname.includes('reverse') ? [PLACES[0]] : PLACES.filter(([n]) => score(n) > 0).sort((a, b) => score(b[0]) - score(a[0]));
+  const features = pick.map(([name, street, postcode, lat, lon]) => ({type: 'Feature', geometry: {type: 'Point', coordinates: [lon, lat]},
+    properties: {name, street, postcode, district: 'Orchard', city: 'Singapore', countrycode: 'SG', osm_key: 'railway'}}));
+  await route.fulfill({status: 200, contentType: 'application/json', headers: {'access-control-allow-origin': '*'}, body: JSON.stringify({type: 'FeatureCollection', features})});
+}
+// Pairs of regions that must never overlap on screen.
+function overlaps() {
+  const box = sel => { const e = document.querySelector(sel); if (!e) return null; const st = getComputedStyle(e); if (st.display === 'none' || st.visibility === 'hidden') return null; const r = e.getBoundingClientRect(); return r.width && r.height ? r : null; };
+  const hit = (a, b) => a && b && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+  const pairs = [['.map-fabs', '#search-card'], ['.map-fabs', '#sheet'], ['.map-fabs', '.maplibregl-ctrl-attrib'], ['.map-fabs', '.tabbar'], ['#search-card', '#sheet'], ['.quick-picks', '.map-fabs']];
+  return pairs.filter(([a, b]) => hit(box(a), box(b))).map(p => p.join(' × '));
+}
 const ORCHARD = {latitude: 1.3045, longitude: 103.8320, accuracy: 12};
 
 async function pick(page, which, query, how = 'keyboard') {
@@ -21,6 +40,12 @@ async function pick(page, which, query, how = 'keyboard') {
 (async () => {
   fs.mkdirSync(OUT, {recursive: true});
   const browser = await chromium.launch();
+  // Search uses recorded Photon-format responses by default (deterministic, and polite to a free volunteer-run
+  // service). LIVE_SEARCH=1 calls the real Photon API instead. Routing (Valhalla) is always live.
+  if (!process.env.LIVE_SEARCH) {
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = async opts => { const c = await newContext(opts); await c.route(/photon\.komoot\.io/, photonFixture); return c; };
+  }
   // ---------------- core journey on an iPhone-sized touch device
   const ctx = await browser.newContext({...devices['iPhone 13'], permissions: ['geolocation'], geolocation: ORCHARD});
   const page = await ctx.newPage(); const errors = [], apiCalls = [];
@@ -39,6 +64,11 @@ async function pick(page, which, query, how = 'keyboard') {
   ok('route options shown with duration', cards.length >= 1 && cards.every(c => /min|hr/.test(c)), cards.map(c => c.replace(/\s+/g, ' ')).join(' | '));
   const st = await page.evaluate(() => { const s = window.__pathway.state, m = window.__pathway.getMap(); const src = m && m.getSource('routes'); return {routes: s.routes.map(r => ({p: r.profile, d: r.distance_m, t: r.duration_s, pts: r.geometry.length, steps: r.steps.length, stairs: r.counts.stairs})), drawn: !!(src && src._data && src._data.features && src._data.features.length)}; });
   ok('route geometry decoded and drawn on map', st.drawn && st.routes.every(r => r.pts > 10), JSON.stringify(st.routes));
+  for (const style of ['liberty', 'onemap']) {
+    await page.evaluate(st => document.getElementById('provider-' + st).click(), style);
+    await page.waitForFunction(() => { const m = window.__pathway.getMap(); return m.isStyleLoaded() && m.getSource('routes'); }, null, {timeout: 30000}).catch(() => {});
+  }
+  ok('switching map style keeps one map instance and redraws the route', await page.evaluate(() => { const m = window.__pathway.getMap(), src = m.getSource('routes'); return window.__pathway.mapInits() === 1 && !!src && src._data.features.length > 0; }));
   ok('walking instructions listed', await page.locator('#steps li').count() > 2, (await page.locator('#steps li').first().innerText()).replace(/\s+/g, ' '));
   ok('wheelchair profile avoids mapped stairs', (st.routes.find(r => r.p === 'wheelchair') || {}).stairs === 0);
   await page.screenshot({path: path.join(OUT, 'mobile-390-route.png')});
@@ -61,8 +91,9 @@ async function pick(page, which, query, how = 'keyboard') {
   ok('multi-select needs: wheelchair preset sets step-free prefs', await page.locator('[data-pref=stepfree]').getAttribute('aria-pressed') === 'true' && await page.locator('[data-pref=lifts]').getAttribute('aria-pressed') === 'true');
   await page.locator('[data-access=lowvision]').click();
   ok('low-vision preset enlarges text', await page.evaluate(() => getComputedStyle(document.documentElement).fontSize) === '19px');
-  ok('data-dependent prefs labelled as not applied', /Data needed/.test(await page.locator('[data-pref=shelter]').innerText()));
-  await page.locator('[data-access=lowvision]').click(); await page.locator('[data-pref=large]').click(); await page.locator('[data-pref=contrast]').click();
+  ok('data-dependent prefs grouped and labelled as not applied', /Not available yet/.test(await page.locator('details[data-group=data] summary').innerText()) && /Not applied yet/.test(await page.locator('details[data-group=data] summary').innerText()) && await page.locator('[data-pref=shelter]').count() === 1);
+  ok('route-changing prefs visible; display/data groups collapsed by default', await page.locator('[data-pref=stepfree]').isVisible() && !(await page.locator('details[data-group=display]').evaluate(d => d.open)));
+  await page.locator('[data-access=lowvision]').click(); await page.locator('details[data-group=display] summary').click(); await page.locator('[data-pref=large]').click(); await page.locator('[data-pref=contrast]').click();
 
   // Save + saved page + plan again
   await page.locator('#save').click();
@@ -162,7 +193,7 @@ async function pick(page, which, query, how = 'keyboard') {
   // API failure handling
   await k.route('**/valhalla1.openstreetmap.de/**', r => r.fulfill({status: 503, contentType: 'application/json', headers: {'access-control-allow-origin': '*'}, body: '{}'}));
   await k.evaluate(() => { const s = window.__pathway.state; s.start = {name: 'A', lat: 1.3046, lng: 103.8318}; s.end = {name: 'B', lat: 1.3004, lng: 103.839}; });
-  await k.click('#plan'); await k.waitForSelector('.route-card', {timeout: 10000});
+  await k.evaluate(() => document.getElementById('plan').click()); await k.waitForSelector('.route-card', {timeout: 10000});
   ok('routing failure falls back to labelled illustration', /Straight-line illustration/.test(await k.locator('#routes').innerText()) && /routing service/i.test(await k.locator('#toast').innerText()));
   await kctx.setOffline(true); await k.evaluate(() => dispatchEvent(new Event('offline')));
   ok('offline banner', await k.locator('#offline-banner').isVisible());
@@ -193,12 +224,27 @@ async function pick(page, which, query, how = 'keyboard') {
   ok('GPS denial explained', /permission|available|long/i.test(await d.locator('#gps-status').innerText()), await d.locator('#gps-status').innerText());
   await dctx.close();
 
+  // ---------------- zoom / reflow: 320 CSS px (= 1280 px at 400% zoom) with Larger text on
+  {
+    const c = await browser.newContext({viewport: {width: 320, height: 640}, hasTouch: true, isMobile: true});
+    await c.addInitScript(() => localStorage.setItem('pathway-v3', JSON.stringify({prefs: {stepfree: true, lifts: true, large: true}})));
+    const p = await c.newPage(); await p.goto(URL_, {waitUntil: 'networkidle'});
+    await p.click('[data-sample=orchard]'); await p.waitForSelector('.route-card', {timeout: 40000}).catch(() => {}); await p.waitForTimeout(800);
+    const r = await p.evaluate(() => ({overflow: document.documentElement.scrollWidth > innerWidth + 1, font: getComputedStyle(document.documentElement).fontSize}));
+    ok('320px + larger text: no horizontal overflow', !r.overflow && r.font === '19px', JSON.stringify(r));
+    const ov = await p.evaluate(overlaps);
+    ok('320px + larger text: no overlapping controls', ov.length === 0, ov.join(', '));
+    await p.screenshot({path: path.join(OUT, 'reflow-320-large-text.png')});
+    await c.close();
+  }
+
   // ---------------- responsive + automated accessibility
   const axeSrc = AXE && fs.existsSync(AXE) ? fs.readFileSync(AXE, 'utf8') : null;
   for (const [w, h, name] of [[375, 812, 'mobile-375'], [390, 844, 'mobile-390'], [768, 1024, 'tablet-768'], [1024, 768, 'tablet-1024'], [1440, 900, 'desktop-1440']]) {
     const c = await browser.newContext({viewport: {width: w, height: h}, hasTouch: w < 1100, isMobile: w < 600, deviceScaleFactor: 1, bypassCSP: !!AXE});
     const p = await c.newPage(); await p.goto(URL_, {waitUntil: 'networkidle'});
-    await p.evaluate(() => { const s = window.__pathway.state; });
+    if (w < 600) ok(name + ': collapsed sheet shows no empty action before places are chosen', await p.locator('#plan').isHidden());
+    if (w === 390) ok('service worker registered under /pathway/', /\/pathway\/$/.test(await p.evaluate(() => Promise.race([navigator.serviceWorker.ready.then(r => r.scope), new Promise(r => setTimeout(() => r('none'), 8000))]))));
     await p.click('[data-sample=orchard]'); await p.waitForSelector('.route-card', {timeout: 40000}).catch(() => {});
     await p.waitForTimeout(1200);
     const m = await p.evaluate(() => {
@@ -207,6 +253,8 @@ async function pick(page, which, query, how = 'keyboard') {
       return {overflow, small};
     });
     ok(name + ': no horizontal overflow', !m.overflow);
+    const ov = await p.evaluate(overlaps);
+    ok(name + ': map controls clear of search card, sheet and attribution', ov.length === 0, ov.join(', '));
     ok(name + ': touch targets ≥44px', m.small.length === 0, m.small.join(', '));
     await p.screenshot({path: path.join(OUT, name + '.png')});
     if (axeSrc) {
@@ -234,7 +282,7 @@ async function pick(page, which, query, how = 'keyboard') {
     const c = await browser.newContext({viewport: {width: 390, height: 844}, hasTouch: true, isMobile: true, bypassCSP: true});
     const p = await c.newPage(); await p.goto(URL_, {waitUntil: 'networkidle'});
     await p.locator('#sheet-handle').click(); await p.locator('#sheet-handle').click();
-    await p.locator('[data-pref=contrast]').click();
+    await p.locator('details[data-group=display] summary').click(); await p.locator('[data-pref=contrast]').click();
     ok('high-contrast mode applies', await p.evaluate(() => document.documentElement.classList.contains('pw-contrast')));
     await p.screenshot({path: path.join(OUT, 'mobile-390-high-contrast.png')});
     await p.addScriptTag({content: axeSrc});

@@ -11,18 +11,15 @@ const token = name => getComputedStyle(document.documentElement).getPropertyValu
 
 /* ------------------------------------------------------------ preferences */
 // status: 'applied' changes routing/ranking, 'display' changes presentation, 'data' needs datasets Pathway doesn't have yet.
+// Grouped by what each preference actually does, so the status is stated once per group (not under every chip).
 const PREF_GROUPS = [
- {title: 'Physical access', items: [
-  ['stepfree', 'Wheelchair-profile routing', 'applied'], ['avoidstairs', 'Avoid stairs', 'applied'], ['lifts', 'Prefer lifts', 'applied'],
-  ['ramps', 'Accessible ramps', 'data'], ['crossings', 'Accessible crossings', 'data'], ['slopes', 'Gentle slopes and kerbs', 'data']]},
- {title: 'Comfort', items: [
-  ['shorter', 'Shorter walking distance', 'applied'], ['simpler', 'Fewer turns', 'applied'],
-  ['shelter', 'Sheltered walkways', 'data'], ['rest', 'Rest stops and seating', 'data'], ['weather', 'Less weather exposure', 'data']]},
- {title: 'Seeing, hearing and understanding', items: [
-  ['spoken', 'Spoken updates', 'display'], ['simple', 'Simplified instructions', 'display'], ['large', 'Larger text', 'display'],
-  ['contrast', 'High contrast', 'display'], ['vibrate', 'Vibration alerts', 'display'], ['visual', 'Visual-only alerts', 'display']]},
+ {id: 'route', status: 'applied', key: 'Changes routes', title: 'Route suggestions', desc: 'These change which route Pathway suggests.', items: [
+  ['stepfree', 'Wheelchair-profile routing'], ['avoidstairs', 'Avoid stairs'], ['lifts', 'Prefer lifts'], ['shorter', 'Shorter distance'], ['simpler', 'Fewer turns']]},
+ {id: 'display', status: 'display', key: 'Changes display', title: 'Display and alerts', desc: 'These change how information is shown or announced.', collapsed: true, items: [
+  ['spoken', 'Spoken updates'], ['simple', 'Simpler instructions'], ['large', 'Larger text'], ['contrast', 'High contrast'], ['vibrate', 'Vibration'], ['visual', 'Visual-only alerts']]},
+ {id: 'data', status: 'data', key: 'Not applied yet', title: 'Not available yet', desc: 'Pathway has no reliable Singapore data for these, so they can’t change routes yet. You can still mark them so the app reminds you they are unknown.', collapsed: true, items: [
+  ['ramps', 'Ramps'], ['crossings', 'Accessible crossings'], ['slopes', 'Gentle slopes and kerbs'], ['shelter', 'Sheltered walkways'], ['rest', 'Rest stops and seating'], ['weather', 'Less weather exposure']]},
 ];
-const STATUS_TEXT = {applied: 'Changes routes', display: 'Changes display', data: 'Data needed, not applied yet'};
 const PRESETS = {
  wheelchair: ['stepfree', 'avoidstairs', 'lifts'], mobility: ['avoidstairs', 'lifts', 'shorter'], blind: ['spoken', 'simple'],
  lowvision: ['large', 'contrast'], hearing: ['visual', 'vibrate'], elderly: ['avoidstairs', 'lifts', 'shorter', 'large'],
@@ -81,7 +78,7 @@ const STYLES = {
  onemap: {version: 8, sources: {onemap: {type: 'raster', tiles: ['https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png'], tileSize: 256, minzoom: 11, maxzoom: 19, bounds: [103.596, 1.1443, 104.1, 1.4835], attribution: ONEMAP_ATTR}},
   layers: [{id: 'bg', type: 'background', paint: {'background-color': '#ECE8F2'}}, {id: 'onemap', type: 'raster', source: 'onemap'}]},
 };
-let map = null, markerA = null, markerB = null, gpsMarker = null;
+let map = null, markerA = null, markerB = null, gpsMarker = null, mapInits = 0;
 let mapLoadTimer = null;
 let mapHasRendered = false;
 function mapLoading(message, actionable = false) {
@@ -124,7 +121,7 @@ async function ensureMap() {
 $('map-retry').addEventListener('click', () => {
  if (!map) return ensureMap();
  mapHasRendered = false;mapLoading('Retrying map tiles…');
- map.setStyle(STYLES[state.mapStyle]);
+ map.setStyle(STYLES[state.mapStyle], {diff: false});
  clearTimeout(mapLoadTimer);mapLoadTimer = setTimeout(mapTimeout, 9000);
 });
 $('map-try-onemap').addEventListener('click', () => { selectStyle('onemap'); });
@@ -138,7 +135,7 @@ function setupMap() {
  clearTimeout(mapLoadTimer);
  mapLoadTimer = setTimeout(mapTimeout, 9000);
  try {
-  const mobile = matchMedia('(max-width: 700px)').matches;
+  const mobile = matchMedia('(max-width: 700px)').matches; mapInits++;
   map = new maplibregl.Map({container: 'map', style: STYLES[state.mapStyle] || STYLES.liberty, center: [103.8318, 1.3046], zoom: mobile ? 12.5 : 13.5,
    minZoom: 10, maxZoom: 19, maxBounds: [[103.3, 1.0], [104.5, 1.7]], attributionControl: {compact: true}, dragRotate: false, pitchWithRotate: false,
    pixelRatio: Math.min(window.devicePixelRatio || 1, 2), // crisp route lines without 3x canvas cost
@@ -233,7 +230,7 @@ function selectStyle(style) {
  if (!STYLES[style]) return;
  state.mapStyle = style; state.mapStyleChosen = true; save();
  ['liberty', 'positron', 'onemap'].forEach(s => $('provider-' + s).setAttribute('aria-pressed', String(s === style)));
- if (map) { mapHasRendered = false; mapLoading('Loading '+(style === 'onemap' ? 'OneMap' : 'map')+' tiles…'); clearTimeout(mapLoadTimer);mapLoadTimer=setTimeout(mapTimeout,9000);map.setStyle(STYLES[style]); }
+ if (map) { mapHasRendered = false; mapLoading('Loading '+(style === 'onemap' ? 'OneMap' : 'map')+' tiles…'); clearTimeout(mapLoadTimer);mapLoadTimer=setTimeout(mapTimeout,9000);map.setStyle(STYLES[style], {diff: false}); } // full reload fires style.load, which re-adds the route and report layers
 }
 
 /* ------------------------------------------------------------ bottom sheet + pages */
@@ -424,13 +421,13 @@ function renderRoutes() {
  box.innerHTML = state.routes.map((r, i) => {
   const c = r.counts, meta = r.illustrative ? ['Straight line ' + fmtDist(r.distance_m)] :
    [fmtDist(r.distance_m), plural(c.stairs, 'stair section', 'stair sections'), plural(c.elevator, 'lift', 'lifts'), plural(c.crossing, 'crossing', 'crossings')];
-  const tag = state.routes.length > 1 && i === rec ? '<span class="tag">' + (physical ? 'Best match for your needs' : 'Fastest') + '</span>' : '';
+  const tag = state.routes.length > 1 && i === rec ? '<span class="tag">' + (physical ? 'Best match' : 'Fastest') + '</span>' : '';
   const warn = (r.warnings || []).map(w => '<div class="warn">' + esc(w) + '</div>').join('');
   const name = A.routeSummary(r, i) + (tag ? ' ' + (physical ? 'Best match for your needs.' : 'Fastest.') : '') + ' ' + (r.warnings || []).join(' ') + (r.illustrative ? '' : ' Not verified as accessible.');
   return '<button type="button" class="route-card" data-route="' + i + '" aria-pressed="' + (i === state.selected) + '" aria-label="' + esc(name) + '">' +
    '<span class="top"><span class="label">' + esc(r.label) + '<span class="selected-mark" aria-hidden="true">✓ Selected</span></span><span class="time">' + (r.illustrative ? '—' : esc(fmtTime(r.duration_s))) + '</span></span>' +
    '<span class="meta">' + meta.map(m => '<span>' + esc(m) + '</span>').join('') + '</span>' +
-   (r.illustrative ? '' : '<span class="meta"><span>' + esc(r.note) + ' Stairs and lifts counted from map data.</span></span>') + tag + warn + '</button>';
+   (r.illustrative ? '' : '<span class="meta note"><span>' + esc(r.note) + ' Stairs and lifts counted from map data.</span></span>') + tag + warn + '</button>';
  }).join('');
  qs('[data-route]', box).forEach(b => b.addEventListener('click', () => {
   state.selected = Number(b.dataset.route); refreshJourneyRoute(); renderRoutes(); drawRoutes();
@@ -438,7 +435,16 @@ function renderRoutes() {
  }));
  renderDetails();
 }
+function renderCta() {
+ const ready = state.routes.length && !state.routes[state.selected]?.illustrative;
+ $('plan').classList.toggle('hidden', !!ready); $('cta-start').classList.toggle('hidden', !ready);
+ $('cta-start').disabled = guide.active;
+ // Nothing to plan until both places are chosen; keeps the collapsed sheet clean.
+ $('plan').parentElement.classList.toggle('hidden', !ready && !(state.start && state.end));
+ $('safety').classList.toggle('hidden', !state.routes.length); // the verification note belongs with a route
+}
 function renderDetails() {
+ renderCta();
  const r = state.routes[state.selected];
  const simple = !!state.prefs.simple; $('steps').classList.toggle('simple', simple); $('needs').closest('.page').classList.toggle('simple', simple);
  if (!r) { $('details-title').textContent = 'Walking directions'; $('route-detail').textContent = 'Choose a start and destination to see step-by-step directions.'; $('steps').innerHTML = ''; return; }
@@ -475,7 +481,7 @@ function updateJourney() {
   badge.textContent = label; badge.className = 'flag ' + tone; $('journey-message').textContent = text;
   $('journey-progress').setAttribute('aria-valuenow', String(Math.round(pct))); $('journey-fill').style.width = pct + '%';
  };
- $('guide-start').disabled = guide.active; $('guide-stop').disabled = !guide.active; $('guide-pause').disabled = !guide.active;
+ $('guide-start').disabled = guide.active; $('guide-stop').disabled = !guide.active; $('guide-pause').disabled = !guide.active; $('cta-start').disabled = guide.active;
  $('journey-recalculate').disabled = !(lastGPS && state.end);
  if (!t) {
   $('latest-instruction').textContent = state.routes[0]?.illustrative ? 'No walking route is available right now. Try again in a moment.' : 'Choose a start and destination to hear the route.';
@@ -544,10 +550,11 @@ function stopGuidance(message) {
 }
 function setPause(on) {
  guide.paused = on; const b = $('guide-pause');
- b.setAttribute('aria-pressed', String(on)); b.querySelector('span').textContent = on ? 'Resume voice' : 'Pause voice';
+ b.setAttribute('aria-pressed', String(on)); b.querySelector('span').textContent = on ? 'Paused' : 'Pause'; // name stays "Pause voice"; aria-pressed carries the state
  b.querySelector('use').setAttribute('href', on ? '#i-play' : '#i-pause');
 }
 $('guide-start').addEventListener('click', startGuidance);
+$('cta-start').addEventListener('click', () => { startGuidance(); if (!matchMedia('(min-width: 900px)').matches) setSheet('half'); $('journey-preview').scrollIntoView({block: 'start', behavior: reducedMotion ? 'auto' : 'smooth'}); });
 $('guide-stop').addEventListener('click', () => stopGuidance());
 $('guide-pause').addEventListener('click', () => {
  const on = !guide.paused; setPause(on);
@@ -677,9 +684,21 @@ addEventListener('pagehide', () => { if (window.PathwayVision) PathwayVision.sto
 
 /* ------------------------------------------------------------ needs & display */
 function renderPrefs() {
- $('pref-groups').innerHTML = PREF_GROUPS.map(g => '<div class="pref-group"><h4>' + esc(g.title) + '</h4><div class="chips">' + g.items.map(([k, label, st]) =>
-  '<button type="button" class="chip" data-pref="' + k + '" aria-pressed="' + !!state.prefs[k] + '">' + esc(label) + '<small>' + STATUS_TEXT[st] + '</small></button>').join('') + '</div></div>').join('');
- qs('[data-pref]').forEach(b => b.addEventListener('click', () => { togglePref(b.dataset.pref); }));
+ const openState = Object.fromEntries(qs('.pref-more').map(d => [d.dataset.group, d.open]));
+ const unsupported = {vibrate: !navigator.vibrate && 'This browser can’t vibrate (iPhone browsers don’t support it).'};
+ const chip = ([k, label]) => unsupported[k]
+  ? '<button type="button" class="chip" data-pref="' + k + '" aria-disabled="true" aria-pressed="false" aria-describedby="pref-' + k + '-why">' + esc(label) + '</button><span class="visually-hidden" id="pref-' + k + '-why">' + esc(unsupported[k]) + '</span>'
+  : '<button type="button" class="chip" data-pref="' + k + '" aria-pressed="' + !!state.prefs[k] + '">' + esc(label) + '</button>';
+ const group = g => '<div class="pref-group" role="group" aria-labelledby="pg-' + g.id + ' pgd-' + g.id + '">' +
+  (g.collapsed ? '' : '<h4 id="pg-' + g.id + '">' + esc(g.title) + ' <span class="status-key ' + g.status + '">' + esc(g.key) + '</span></h4>') +
+  '<p class="group-desc" id="pgd-' + g.id + '">' + esc(g.desc) + '</p><div class="chips">' + g.items.map(chip).join('') + '</div></div>';
+ $('pref-groups').innerHTML = PREF_GROUPS.map(g => !g.collapsed ? group(g) :
+  '<details class="pref-more" data-group="' + g.id + '"' + (openState[g.id] ? ' open' : '') + '><summary><span id="pg-' + g.id + '">' + esc(g.title) +
+  ' <span class="status-key ' + g.status + '">' + esc(g.key) + '</span></span></summary>' + group(g) + '</details>').join('');
+ qs('[data-pref]').forEach(b => b.addEventListener('click', () => {
+  if (b.getAttribute('aria-disabled') === 'true') return toast(unsupported[b.dataset.pref]);
+  togglePref(b.dataset.pref);
+ }));
  applyDisplay();
 }
 function togglePref(k, value) {
@@ -696,7 +715,7 @@ function applyDisplay() {
  document.documentElement.classList.toggle('pw-contrast', !!state.prefs.contrast);
  restyleMap();
  qs('[data-access]').forEach(b => b.setAttribute('aria-pressed', String(!!state.access[b.dataset.access])));
- const missing = PREF_GROUPS.flatMap(g => g.items).filter(([k, , st]) => st === 'data' && state.prefs[k]).map(([, l]) => l.toLowerCase());
+ const missing = PREF_GROUPS.find(g => g.id === 'data').items.filter(([k]) => state.prefs[k]).map(([, l]) => l.toLowerCase());
  $('accessibility-note').textContent = (missing.length ? 'Not applied yet, because reliable Singapore data isn’t connected: ' + missing.join(', ') + '. ' : '') +
   'Preferences never make a route verified-safe.' + (state.prefs.vibrate && !navigator.vibrate ? ' Vibration isn’t supported in this browser.' : '');
  if (map) setTimeout(() => map.resize(), 50);
@@ -829,8 +848,9 @@ async function startup() {
 }
 function registerServiceWorker() {
  if (!('serviceWorker' in navigator) || location.protocol !== 'https:' && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') return;
- addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+ // updateViaCache 'none': always check sw.js itself on the network, so a new deploy is picked up on the next visit.
+ addEventListener('load', () => navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).catch(() => {}));
 }
-window.__pathway = {state, getMap: () => map}; // read-only hook for automated tests
+window.__pathway = {state, getMap: () => map, mapInits: () => mapInits}; // read-only hook for automated tests
 startup();
 })();

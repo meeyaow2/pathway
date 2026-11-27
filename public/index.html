@@ -99,8 +99,8 @@
    <p class="status-line" id="address-status" role="status" aria-live="polite"></p>
    <div class="quick-picks" id="demo-fields" role="group" aria-label="Sample places">
     <span class="quick-label">Try:</span>
-    <button type="button" class="chip-sm" data-sample="orchard">Orchard MRT → Somerset MRT</button>
-    <button type="button" class="chip-sm" data-sample="ion">ION Orchard → Paragon</button>
+    <button type="button" class="chip-sm" data-sample="orchard" aria-label="Sample journey: Orchard MRT to Somerset MRT">Orchard → Somerset</button>
+    <button type="button" class="chip-sm" data-sample="ion" aria-label="Sample journey: ION Orchard to Paragon">ION → Paragon</button>
    </div>
   </header>
 
@@ -117,9 +117,10 @@
      <div id="routes" class="routes" role="group" aria-labelledby="routes-heading"></div>
      <div class="cta-row">
       <button type="button" id="plan" class="btn primary">Get walking directions</button>
+      <button type="button" id="cta-start" class="btn primary hidden"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Start guidance</button>
       <button type="button" id="save" class="btn icon-only" aria-label="Save this journey"><svg class="icon"><use href="#i-heart"/></svg></button>
      </div>
-     <p class="callout" id="safety">Routes come from community map data and are <strong>not verified</strong> for accessibility. Check kerbs, slopes, lifts and crossings yourself.</p>
+     <p class="callout" id="safety"><strong>Not verified for accessibility.</strong> Routes use community map data; check kerbs, slopes, lifts and crossings yourself.</p>
 
      <section class="journey" id="journey-preview" aria-labelledby="journey-heading" tabindex="-1">
       <div class="row-between"><h3 class="h3" id="journey-heading">Journey guidance</h3><span class="flag" id="journey-badge">NOT STARTED</span></div>
@@ -134,10 +135,10 @@
       <div class="meter" role="progressbar" id="journey-progress" aria-label="Estimated journey progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="journey-fill"></div></div>
       <div class="journey-stats"><span id="journey-distance">Remaining: —</span><span id="journey-accuracy">GPS accuracy: —</span></div>
       <div class="guidance-controls" role="group" aria-label="Guidance controls">
-       <button type="button" id="guide-start" class="btn primary"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Start guidance</button>
-       <button type="button" id="guide-pause" class="btn" aria-pressed="false" disabled><svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg><span>Pause voice</span></button>
-       <button type="button" id="journey-announce" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-speaker"/></svg>Repeat</button>
-       <button type="button" id="guide-stop" class="btn" disabled><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg>Stop</button>
+       <button type="button" id="guide-start" class="btn primary" aria-label="Start guidance"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Start</button>
+       <button type="button" id="guide-pause" class="btn" aria-pressed="false" aria-label="Pause voice" disabled><svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg><span>Pause</span></button>
+       <button type="button" id="journey-announce" class="btn" aria-label="Repeat latest instruction"><svg class="icon" aria-hidden="true"><use href="#i-speaker"/></svg>Repeat</button>
+       <button type="button" id="guide-stop" class="btn" aria-label="Stop guidance" disabled><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg>Stop</button>
       </div>
       <div class="btn-row">
        <button type="button" id="where-am-i" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Where am I?</button>
@@ -186,16 +187,16 @@
      </section>
 
      <section class="needs" id="needs" aria-labelledby="needs-heading">
-      <h3 class="h3" id="needs-heading">Your needs</h3>
-      <p class="muted small">Choose everything that applies. Each option says whether it changes routes today or needs data that isn't available yet. Saved on this device only.</p>
-      <div class="chips" role="group" aria-label="Quick setup">
+      <div class="row-between"><h3 class="h3" id="needs-heading">Your needs</h3><span class="muted small">Saved on this device</span></div>
+      <p class="muted small" id="quick-setup-label" style="margin:2px 0 0">Choose everything that applies. Each choice turns on related preferences below.</p>
+      <div class="chips" role="group" aria-labelledby="needs-heading quick-setup-label">
        <button type="button" class="chip" data-access="wheelchair" aria-pressed="false">Wheelchair user</button>
        <button type="button" class="chip" data-access="mobility" aria-pressed="false">Limited mobility</button>
        <button type="button" class="chip" data-access="blind" aria-pressed="false">Blind</button>
        <button type="button" class="chip" data-access="lowvision" aria-pressed="false">Low vision</button>
        <button type="button" class="chip" data-access="hearing" aria-pressed="false">Deaf / hard of hearing</button>
        <button type="button" class="chip" data-access="elderly" aria-pressed="false">Older traveller</button>
-       <button type="button" class="chip" data-access="fatigue" aria-pressed="false">Fatigue / need rests</button>
+       <button type="button" class="chip" data-access="fatigue" aria-pressed="false">Need rests</button>
        <button type="button" class="chip" data-access="cognitive" aria-pressed="false">Cognitive / sensory</button>
       </div>
       <div id="pref-groups"></div>
