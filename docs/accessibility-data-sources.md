@@ -22,6 +22,20 @@ Status key: **Live** = called successfully from Pathway during development · **
 | **Tactile paving, accessible crossings (e.g. Green Man+), rest seating** | Visual-impairment and fatigue needs | **No authoritative public dataset found** | — | — | Shown as "Data needed, not applied" |
 | **Pathway barrier reports** | Barriers reported by users | Built in | — | Currently a **local demo**: saved only in the user's browser, never shared, never used for routing | **Simulated** (shared reports need a backend) |
 
+## Data that would most help nonvisual navigation
+
+| Need | Best available source | Status in Pathway |
+|---|---|---|
+| MRT station exits | LTA *MRT Station Exit* (data.gov.sg, open). Exit locations only, not which exits are barrier-free | Not yet used. The OneMap basemap shows numbered exits visually only |
+| Accessible station entrances, lift locations | No open per-exit dataset found. MOT states every station has at least one barrier-free route | **Unknown.** Never assumed |
+| Lift maintenance | LTA DataMall *Facilities Maintenance* (real time, needs an AccountKey, so it needs a backend) | Not connected |
+| Tactile paving | OpenStreetMap `tactile_paving=*`, sparse and unverified. No government dataset found | **Unknown.** Never spoken as present |
+| Accessible / audible crossings (e.g. Green Man+) | No open location dataset confirmed | **Unknown.** Every crossing is announced with uncertainty |
+| Sheltered paths | LTA *Covered Linkway* (quarterly shapefile) | Not yet processed |
+| Building entrances | OpenStreetMap `entrance=*` (patchy) | Not used. Arrival messages say the entrance can't be located |
+
+All spoken route facts are **community map observations** (OpenStreetMap through Valhalla) and are labelled that way. Nothing is presented as verified.
+
 ## Principles applied in the app
 
 1. **One level of evidence today:** OpenStreetMap-derived step and lift information, shown as "counted from map data" and never as verified. The wheelchair-profile route is labelled *computed to avoid steps recorded in map data, not verified as accessible*.

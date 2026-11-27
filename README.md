@@ -24,7 +24,14 @@ Pathway is designed with a broad range of people in mind, including wheelchair u
 - **Compare walking options.** View a standard walking route alongside a wheelchair-profile route designed to avoid steps that are recorded in OpenStreetMap data. Both are computed, not independently verified.
 - **Understand the journey.** See estimated walking times, distances, route geometry, and directions, with available map observations about stairs, lifts, and crossings.
 - **Personalise the experience.** Explore accessibility preferences and presentation options, including larger text, high contrast, spoken updates, and simplified directions.
-- **Try GPS journey progress.** An experimental on-map progress preview can show approximate position and off-route warnings.
+- **Plan and follow a journey without the map.** *Audio mode* is built for blind and low-vision people. It hides the map, uses one readable column with large Start, Pause, Repeat and Stop controls, and reads concise updates:
+  - route comparisons and upcoming instructions
+  - remaining distance, GPS accuracy, possible off-route and arrival
+  - **Where am I?** (an approximate nearby place)
+
+  Updates come either from Pathway's own voice or through your screen reader, never both at once. Crossings, stairs and lifts are described with their uncertainty. Pathway never says it's safe to cross.
+- **Try GPS journey guidance.** Approximate progress, the current step, off-route warnings, rerouting, and optional vibration cues on Android.
+- **Experimental: read a sign.** Take a photo of printed text, such as an exit sign or building name, and Pathway reads it **on your device**. Photos are never uploaded or saved, and the result is presented as a possibly-wrong interpretation. It doesn't detect obstacles, vehicles or crossings.
 - **Explore community reporting.** Create a test barrier report in your browser to see how community observations might support better accessibility information in the future. These demo reports are not shared or verified.
 
 ## Accessibility is more than one feature
@@ -47,7 +54,7 @@ This project is intended to demonstrate the opportunities—and responsibilities
 
 ## Built with
 
-Pathway is a lightweight static website hosted on GitHub Pages. It uses MapLibre GL JS with OpenFreeMap for interactive maps, Photon for OpenStreetMap-based location search, Valhalla for walking-route calculations, and browser capabilities for GPS and optional speech. Service availability, rate limits, data coverage, and third-party terms apply.
+Pathway is a lightweight static website hosted on GitHub Pages. It uses MapLibre GL JS with Singapore's OneMap basemap (default, fastest in Singapore) or OpenFreeMap, Photon for OpenStreetMap-based location search, Valhalla for walking-route calculations, browser capabilities for GPS, speech, vibration and screen wake lock, and on-device Tesseract text recognition for the experimental sign reader. Service availability, rate limits, data coverage, and third-party terms apply.
 
 The website does not require an account. Saved journeys and simulated barrier reports are stored locally in the visitor's browser, not shared with other visitors.
 
@@ -59,27 +66,50 @@ The website source lives in [`public/`](public/), with design and research notes
 |---|---|
 | [Design system](docs/design-system.md) | Purple palette, accessible components, and interaction guidelines |
 | [Accessibility data research](docs/accessibility-data-sources.md) | Potential Singapore sources, limitations, and data gaps |
+| [Audio mode and nonvisual planning](docs/audio-navigation.md) | How audio guidance works, what is spoken and when, and testing status |
+| [Map performance](docs/performance.md) | Root cause of slow map loading, before/after measurements, third-party limits |
+| [Visual assistance research](docs/visual-assistance.md) | Camera, OCR and AI options, privacy rules, and the experimental sign reader |
 | [Future backend](docs/future-backend.md) | What a production-ready data and moderation architecture would require |
 
 ### Run locally
 
 ```bash
-python3 -m http.server 8765 -d public
+node tests/serve.js
 ```
 
-Open http://127.0.0.1:8765/.
+Open http://127.0.0.1:8765/pathway/. This mimics GitHub Pages: it serves under the `/pathway/` path with gzip compression and the same cache lifetime.
+
+Any static server also works, for example `python3 -m http.server 8765 -d public`. Add `?mode=audio` to open audio mode directly.
 
 ### Run tests
 
+Unit tests (no network, no dependencies):
+
 ```bash
-node --test tests/providers.test.js
+node --test tests/*.test.js
 ```
 
-Browser-based tests are in [`tests/e2e.js`](tests/e2e.js) and require their documented browser dependencies and a running local site.
+End-to-end browser test, with a local site running. It needs Playwright and calls the live search and routing services:
+
+```bash
+node tests/e2e.js
+```
+
+Performance benchmark (simulated slow phone and network):
+
+```bash
+node tests/perf.js
+```
+
+To test the published site instead, set `PATHWAY_URL`:
+
+```bash
+PATHWAY_URL=https://meeyaow2.github.io/pathway/ node tests/e2e.js
+```
 
 ### GitHub Pages publishing
 
-The GitHub Actions workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes **only the `public/` directory** on pushes to `main`. In repository **Settings → Pages → Build and deployment → Source**, select **GitHub Actions** for the canonical URL to serve the application directly.
+The GitHub Actions workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes **only the `public/` directory** on pushes to `main`, stamping the commit ID into the service worker so returning visitors get the new version. In repository **Settings → Pages → Build and deployment → Source**, select **GitHub Actions** for the canonical URL to serve the application directly.
 
 A root `index.html` redirect is also included as a fallback for repositories still configured to publish the `main` branch root. It sends visitors to `/pathway/public/` until GitHub Actions publishing is enabled.
 

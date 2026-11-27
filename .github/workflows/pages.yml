@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '20'
       - name: Unit tests (no network)
-        run: node --test tests/providers.test.js
+        run: node --test tests/*.test.js
       - name: Syntax check
         run: for f in public/*.js; do node --check "$f"; done
 
@@ -38,6 +38,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp the service-worker build ID (new deploy = fresh app cache)
+        run: sed -i "s/__BUILD__/${GITHUB_SHA::8}/" public/sw.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

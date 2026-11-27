@@ -28,7 +28,9 @@ async function pick(page, which, query, how = 'keyboard') {
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(URL_, {waitUntil: 'networkidle'});
-  ok('map canvas rendered', await page.locator('#map canvas').count() > 0);
+  ok('search usable before the map finishes', await page.locator('#start-search').isEditable());
+  await page.waitForSelector('#map canvas', {timeout: 30000});
+  ok('map canvas rendered (lazy-loaded)', await page.locator('#map canvas').count() > 0);
   await pick(page, 'start', 'Orchard MRT', 'keyboard');
   ok('start chosen with keyboard (ArrowDown + Enter)', (await page.locator('#start-search').inputValue()).length > 2, await page.locator('#start-search').inputValue());
   await pick(page, 'end', 'Somerset MRT', 'touch');
@@ -43,7 +45,7 @@ async function pick(page, which, query, how = 'keyboard') {
 
   // GPS follow + progress + reroute
   await page.locator('#follow-gps').tap();
-  await page.waitForFunction(() => !['GPS OFF', 'NOT NAVIGATING'].includes(document.getElementById('journey-badge').textContent), null, {timeout: 15000});
+  await page.waitForFunction(() => !['NOT STARTED', 'WAITING FOR GPS'].includes(document.getElementById('journey-badge').textContent), null, {timeout: 15000});
   ok('GPS progress shown', true, await page.locator('#journey-badge').innerText() + ' / ' + await page.locator('#journey-distance').innerText());
   await ctx.setGeolocation({latitude: 1.3150, longitude: 103.8450, accuracy: 12});
   await page.waitForFunction(() => document.getElementById('journey-badge').textContent === 'POSSIBLY OFF ROUTE', null, {timeout: 15000}).catch(() => {});
@@ -91,6 +93,60 @@ async function pick(page, which, query, how = 'keyboard') {
   ok('no JavaScript errors in journey', errors.filter(e => !/tiles|Failed to load resource/.test(e)).length === 0, errors.join(' | '));
   await ctx.close();
 
+  // ---------------- audio mode: plan and follow a journey without the map
+  {
+    const actx = await browser.newContext({...devices['iPhone 13'], permissions: ['geolocation'], geolocation: ORCHARD});
+    await actx.addInitScript(() => {
+      window.__spoken = [];
+      const fake = {speaking: false, pending: false, paused: false, cancel() { this.speaking = false; }, getVoices: () => [],
+        speak(u) { window.__spoken.push(u.text); this.speaking = true; setTimeout(() => { this.speaking = false; u.onend && u.onend(); }, 30); }};
+      Object.defineProperty(window, 'speechSynthesis', {value: fake, configurable: true});
+    });
+    const a = await actx.newPage(); const aerr = []; a.on('pageerror', e => aerr.push(e.message));
+    const tileReqs = []; a.on('request', r => { if (/onemap\.gov\.sg\/maps|openfreemap|maplibre-gl\.js/.test(r.url())) tileReqs.push(r.url()); });
+    await a.goto(URL_ + '?mode=audio', {waitUntil: 'networkidle'});
+    ok('audio mode: map not downloaded', !(await a.evaluate(() => !!window.maplibregl)) && tileReqs.filter(u => !/maplibre-gl\.js/.test(u)).length === 0, tileReqs.length + ' map requests');
+    ok('audio mode: guidance controls visible without map', await a.locator('#guide-start').isVisible() && !(await a.locator('#map').isVisible()));
+    await pick(a, 'start', 'Orchard MRT', 'keyboard'); await pick(a, 'end', 'Somerset MRT', 'keyboard');
+    await a.waitForSelector('.route-card', {timeout: 40000});
+    const label = await a.locator('.route-card').first().getAttribute('aria-label');
+    ok('route card has a concise spoken label', /minutes/.test(label) && /Not verified/.test(label), label);
+    await a.waitForFunction(() => window.__spoken.some(t => /routes? found/.test(t)), null, {timeout: 5000}).catch(() => {});
+    ok('route comparison spoken', (await a.evaluate(() => window.__spoken.join(' | '))).includes('Option 1'));
+    await a.locator('#guide-start').click();
+    await a.waitForFunction(() => window.__spoken.some(t => t.startsWith('Guidance started')), null, {timeout: 5000});
+    ok('guidance start summary includes limits', /can’t detect crossings, obstacles or entrances/.test(await a.evaluate(() => window.__spoken.find(t => t.startsWith('Guidance started')))));
+    const pts = await a.evaluate(() => { const r = window.__pathway.state.routes[window.__pathway.state.selected]; const s = r.steps.find((x, i) => i > 1 && x.shape_index > 2); return {p: r.geometry[Math.max(0, s.shape_index - 1)], all: r.geometry}; });
+    await actx.setGeolocation({latitude: pts.p[0], longitude: pts.p[1], accuracy: 8});
+    await a.waitForFunction(() => window.__spoken.some(t => /^In about/.test(t)), null, {timeout: 15000}).catch(() => {});
+    ok('upcoming instruction spoken near the maneuver', await a.evaluate(() => window.__spoken.some(t => /^In about/.test(t))), (await a.evaluate(() => window.__spoken.slice(-2).join(' | '))));
+    await a.locator('#guide-pause').click();
+    const before = await a.evaluate(() => window.__spoken.length);
+    await actx.setGeolocation({latitude: 1.3150, longitude: 103.8450, accuracy: 8});
+    await a.waitForFunction(() => document.getElementById('journey-badge').textContent === 'POSSIBLY OFF ROUTE', null, {timeout: 15000}).catch(() => {});
+    ok('paused voice stays silent but screen shows off-route', (await a.evaluate(() => window.__spoken.length)) === before && await a.locator('#journey-badge').innerText() === 'POSSIBLY OFF ROUTE',
+      await a.locator('#journey-badge').innerText() + ' / ' + await a.locator('#gps-status').innerText() + ' / ' + await a.evaluate(n => window.__spoken.slice(n).join(' | '), before));
+    await a.locator('#journey-announce').click();
+    ok('repeat speaks the latest instruction even when paused', (await a.evaluate(() => window.__spoken.length)) === before + 1);
+    await a.locator('#guide-pause').click();
+    await a.locator('#where-am-i').click();
+    await a.waitForFunction(() => window.__spoken.some(t => /Approximately near|no nearby place/.test(t)), null, {timeout: 15000}).catch(() => {});
+    ok('"Where am I?" speaks an approximate place', await a.evaluate(() => window.__spoken.some(t => /Approximately near|no nearby place/.test(t))), await a.evaluate(() => window.__spoken.slice(-1)[0]));
+    await a.locator('#voice-settings summary').click(); await a.locator('#set-target-sr').check();
+    const spokenBefore = await a.evaluate(() => window.__spoken.length);
+    await actx.setGeolocation({latitude: pts.all[3][0], longitude: pts.all[3][1], accuracy: 8});
+    await a.waitForFunction(() => /near the route|Back/.test(document.getElementById('guide-live').textContent + document.getElementById('sr-alert').textContent), null, {timeout: 15000}).catch(() => {});
+    ok('screen-reader channel: live region instead of a second voice', (await a.evaluate(() => window.__spoken.length)) === spokenBefore && (await a.evaluate(() => document.getElementById('guide-live').textContent + document.getElementById('sr-alert').textContent)).length > 0, await a.evaluate(() => document.getElementById('guide-live').textContent));
+    await a.locator('#guide-stop').click();
+    ok('stop ends guidance', await a.locator('#guide-start').isEnabled() && await a.locator('#follow-gps').getAttribute('aria-pressed') === 'false');
+    const all = await a.evaluate(() => window.__spoken.join(' '));
+    ok('no confident safety commands spoken', !/cross now|path (ahead )?is clear|it is safe to/i.test(all));
+    ok('audio mode: no JavaScript errors', aerr.length === 0, aerr.join(' | '));
+    await a.locator('#show-map').click(); await a.waitForSelector('#map canvas', {timeout: 30000});
+    ok('audio mode: map available on request', await a.locator('#map canvas').isVisible());
+    await actx.close();
+  }
+
   // ---------------- keyboard + focus management (desktop)
   const kctx = await browser.newContext({viewport: {width: 1440, height: 900}});
   const k = await kctx.newPage(); await k.goto(URL_, {waitUntil: 'networkidle'});
@@ -111,6 +167,24 @@ async function pick(page, which, query, how = 'keyboard') {
   await kctx.setOffline(true); await k.evaluate(() => dispatchEvent(new Event('offline')));
   ok('offline banner', await k.locator('#offline-banner').isVisible());
   await kctx.close();
+
+  // Experimental on-device text reading (a photo of a sign; no camera stream, nothing uploaded)
+  {
+    const vctx = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+    const v = await vctx.newPage(); const uploads = [];
+    const allowed = [new URL(URL_).host, 'www.onemap.gov.sg', 'tiles.openfreemap.org', 'photon.komoot.io', 'valhalla1.openstreetmap.de'];
+    v.on('request', r => { const u = new URL(r.url()); if (r.method() !== 'GET' || (u.protocol.startsWith('http') && !allowed.includes(u.host))) uploads.push(r.method() + ' ' + r.url()); });
+    await v.goto(URL_, {waitUntil: 'networkidle'});
+    ok('camera reader not loaded until asked', !(await v.evaluate(() => !!window.PathwayVision || !!window.Tesseract)));
+    await v.locator('#sheet-handle').click(); await v.locator('#sheet-handle').click();
+    await v.locator('#vision-details summary').click();
+    await v.setInputFiles('#vision-input', path.join(__dirname, 'fixtures', 'sign-exit-b.jpg'));
+    await v.waitForFunction(() => !document.getElementById('vision-result').hidden || /isn’t available/.test(document.getElementById('vision-status').textContent), null, {timeout: 120000});
+    const res = await v.locator('#vision-result').innerText().catch(() => '');
+    ok('on-device text reading of a sign photo', /EXIT B/i.test(res) && /Orchard Road/i.test(res) && /may be incomplete or wrong/.test(res), res || await v.locator('#vision-status').innerText());
+    ok('no photo upload or non-GET requests', uploads.length === 0, uploads.join(' '));
+    await vctx.close();
+  }
 
   // GPS permission denied
   const dctx = await browser.newContext({viewport: {width: 390, height: 844}, permissions: []});
@@ -140,6 +214,19 @@ async function pick(page, which, query, how = 'keyboard') {
       const v = await p.evaluate(async () => (await axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'], exclude: [['.maplibregl-canvas-container']]})).violations.map(x => x.id + '(' + x.nodes.length + '): ' + x.nodes.slice(0, 2).map(n => n.target.join(' ')).join('; ')));
       ok(name + ': axe WCAG 2.2 AA', v.length === 0, v.join(' | '));
     }
+    await c.close();
+  }
+  // Audio mode and the camera panel pass automated checks too
+  if (axeSrc) for (const [w, h] of [[390, 844], [1024, 768]]) {
+    const c = await browser.newContext({viewport: {width: w, height: h}, hasTouch: true, isMobile: w < 600, bypassCSP: true});
+    const p = await c.newPage(); await p.goto(URL_ + '?mode=audio', {waitUntil: 'networkidle'});
+    await p.locator('#vision-details summary').click(); await p.locator('#voice-settings summary').click();
+    const m = await p.evaluate(() => [...document.querySelectorAll('button,input,select,summary')].filter(e => { const r = e.getBoundingClientRect(); return r.width && r.height && !e.closest('.visually-hidden,.skip-link') && getComputedStyle(e).visibility !== 'hidden' && (r.height < 24 || r.width < 24); }).map(e => e.id || e.tagName));
+    ok('audio mode ' + w + 'px: targets ≥24px', m.length === 0, m.join(', '));
+    await p.screenshot({path: path.join(OUT, 'audio-mode-' + w + '.png'), fullPage: false});
+    await p.addScriptTag({content: axeSrc});
+    const v = await p.evaluate(async () => (await axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']})).violations.map(x => x.id + ': ' + x.nodes.slice(0, 2).map(n => n.target.join(' ')).join('; ')));
+    ok('audio mode ' + w + 'px: axe WCAG 2.2 AA', v.length === 0, v.join(' | '));
     await c.close();
   }
   // High-contrast mode still works and passes automated checks

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#6941C6">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://www.onemap.gov.sg; connect-src 'self' https://photon.komoot.io https://valhalla1.openstreetmap.de https://tiles.openfreemap.org https://www.onemap.gov.sg; worker-src 'self' blob:; child-src blob:; font-src 'self'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://www.onemap.gov.sg; connect-src 'self' https://photon.komoot.io https://valhalla1.openstreetmap.de https://tiles.openfreemap.org https://www.onemap.gov.sg; worker-src 'self' blob:; child-src blob:; font-src 'self'; base-uri 'self'; form-action 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="description" content="Pathway: accessibility-first walking routes in Singapore. Compare wheelchair-profile and standard walking routes, with honest information about what is and isn't verified.">
 <title>Pathway — accessible walking routes in Singapore</title>
@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
 <link rel="dns-prefetch" href="//tiles.openfreemap.org">
 <link rel="preconnect" href="https://www.onemap.gov.sg" crossorigin>
-<link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css">
+<link rel="preload" href="vendor/maplibre-gl-4.7.1/maplibre-gl.js" as="script" fetchpriority="low">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -30,16 +30,23 @@
   <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+  <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4h3v16H7zM14 4h3v16h-3z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 22s7-6.4 7-12a7 7 0 0 0-14 0c0 5.6 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4s1.5-1 5-1 5 2 8 2 3-.5 3-.5v11s-1 .5-3 .5-5-2-8-2-5 1-5 1"/></symbol>
  </defs>
 </svg>
 
 <a class="skip-link" href="#sheet-content">Skip to journey details</a>
+<a class="skip-link" href="#journey-preview">Skip to audio guidance</a>
 <h1 class="visually-hidden">Pathway — accessibility-first walking routes in Singapore</h1>
 
 <div class="app" id="app" data-sheet="peek" data-page="planner">
  <div id="map" role="region" aria-label="Map. Every route on the map is also described as text in the journey panel.">
-  <div class="map-fallback"><p>Loading Singapore map…</p></div>
+  <div class="map-placeholder" aria-hidden="true"></div>
  </div>
  <div id="map-load-status" class="map-load-status" role="status" aria-live="polite" hidden>
    <span id="map-load-message">Loading map tiles…</span>
@@ -67,7 +74,8 @@
   <header class="search-card" id="search-card">
    <div class="brand-row">
     <span class="brand"><svg class="icon brand-mark" aria-hidden="true"><use href="#i-route"/></svg>Pathway</span>
-    <span class="pill" id="service-mode">ACCESS UNVERIFIED</span>
+    <button type="button" class="mode-toggle" id="audio-mode" aria-pressed="false" aria-describedby="audio-mode-desc"><svg class="icon" aria-hidden="true"><use href="#i-headphones"/></svg>Audio mode</button>
+    <span class="visually-hidden" id="audio-mode-desc">Plan and follow a journey without the map: spoken updates and large controls.</span>
    </div>
    <form id="search-form" role="search" aria-label="Plan a walking route" novalidate>
     <div class="search-fields">
@@ -105,24 +113,69 @@
     <section id="planner" class="page" aria-labelledby="planner-heading">
      <h2 id="planner-heading" class="visually-hidden">Plan a route</h2>
 
-     <div class="row-between"><h3 class="h3">Route options</h3><span class="muted small" id="route-source">Awaiting addresses</span></div>
-     <div id="routes" class="routes" aria-live="polite"></div>
+     <div class="row-between"><h3 class="h3" id="routes-heading">Route options</h3><span class="muted small" id="route-source">Awaiting addresses</span></div>
+     <div id="routes" class="routes" role="group" aria-labelledby="routes-heading"></div>
      <div class="cta-row">
       <button type="button" id="plan" class="btn primary">Get walking directions</button>
       <button type="button" id="save" class="btn icon-only" aria-label="Save this journey"><svg class="icon"><use href="#i-heart"/></svg></button>
      </div>
      <p class="callout" id="safety">Routes come from community map data and are <strong>not verified</strong> for accessibility. Check kerbs, slopes, lifts and crossings yourself.</p>
 
-     <section class="journey" id="journey-preview" aria-labelledby="journey-heading">
-      <div class="row-between"><h3 class="h3" id="journey-heading">Journey progress</h3><span class="flag" id="journey-badge">NOT NAVIGATING</span></div>
-      <p id="journey-message" class="muted" role="status" aria-live="polite">Load a walking route, then choose Follow to see approximate progress.</p>
+     <section class="journey" id="journey-preview" aria-labelledby="journey-heading" tabindex="-1">
+      <div class="row-between"><h3 class="h3" id="journey-heading">Journey guidance</h3><span class="flag" id="journey-badge">NOT STARTED</span></div>
+      <p class="audio-intro" id="audio-intro">Audio mode: plan with the search fields above, then start guidance. Pathway reads route instructions and GPS status. It can’t see crossings, obstacles or entrances, so keep using your cane, guide dog or other usual aids.</p>
+      <dl class="journey-summary" id="journey-summary">
+       <div><dt>From</dt><dd id="sum-from">Not chosen</dd></div>
+       <div><dt>To</dt><dd id="sum-to">Not chosen</dd></div>
+       <div><dt>Route</dt><dd id="sum-route">None yet</dd></div>
+      </dl>
+      <p class="latest" id="latest-instruction">Choose a start and destination to hear the route.</p>
+      <p id="journey-message" class="muted">Start guidance to follow your approximate progress with GPS.</p>
       <div class="meter" role="progressbar" id="journey-progress" aria-label="Estimated journey progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="journey-fill"></div></div>
       <div class="journey-stats"><span id="journey-distance">Remaining: —</span><span id="journey-accuracy">GPS accuracy: —</span></div>
-      <p id="gps-status" class="small muted" role="status" aria-live="polite">GPS is off. Location is never stored.</p>
-      <div class="btn-row">
-       <button type="button" id="journey-announce" class="btn"><svg class="icon"><use href="#i-speaker"/></svg>Read update</button>
-       <button type="button" id="journey-recalculate" class="btn" disabled><svg class="icon"><use href="#i-refresh"/></svg>Reroute from here</button>
+      <div class="guidance-controls" role="group" aria-label="Guidance controls">
+       <button type="button" id="guide-start" class="btn primary"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Start guidance</button>
+       <button type="button" id="guide-pause" class="btn" aria-pressed="false" disabled><svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg><span>Pause voice</span></button>
+       <button type="button" id="journey-announce" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-speaker"/></svg>Repeat</button>
+       <button type="button" id="guide-stop" class="btn" disabled><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg>Stop</button>
       </div>
+      <div class="btn-row">
+       <button type="button" id="where-am-i" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Where am I?</button>
+       <button type="button" id="journey-recalculate" class="btn" disabled><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Reroute from here</button>
+       <button type="button" id="show-map" class="btn audio-only"><svg class="icon" aria-hidden="true"><use href="#i-route"/></svg>Show map</button>
+      </div>
+      <p id="gps-status" class="small muted">GPS is off. Location is never stored.</p>
+      <details class="voice-settings" id="voice-settings">
+       <summary>Voice and alert settings</summary>
+       <label class="check"><input type="checkbox" id="set-auto"> Speak updates automatically</label>
+       <fieldset><legend>Who reads updates aloud</legend>
+        <label class="check"><input type="radio" name="voice-target" value="voice" id="set-target-voice"> Pathway’s voice <small>(works without a screen reader)</small></label>
+        <label class="check"><input type="radio" name="voice-target" value="screenreader" id="set-target-sr"> My screen reader <small>(VoiceOver or TalkBack; avoids two voices at once)</small></label>
+       </fieldset>
+       <label class="field-inline" for="set-rate">Speaking speed
+        <select id="set-rate"><option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option></select></label>
+       <label class="check"><input type="checkbox" id="set-vibrate"> Vibration cues <small>(Android; iPhone browsers don’t support vibration)</small></label>
+       <label class="check"><input type="checkbox" id="set-wake"> Keep the screen on during guidance</label>
+      </details>
+     </section>
+
+     <section class="vision" id="vision" aria-labelledby="vision-heading">
+      <details id="vision-details">
+       <summary><span id="vision-heading">Read a sign with the camera</span> <span class="flag">EXPERIMENTAL</span></summary>
+       <p>Take a photo of printed text, such as a building name or an exit sign. Pathway reads the text on this device and can read it aloud.</p>
+       <ul class="plain small">
+        <li>The photo is processed on your device. It is never uploaded or saved.</li>
+        <li>The first use downloads about 6 MB of text-recognition files.</li>
+        <li>It only reads printed text. It can’t detect obstacles, vehicles, crossings, people or whether a way is accessible, and its reading may be incomplete or wrong.</li>
+       </ul>
+       <input type="file" id="vision-input" accept="image/*" capture="environment" class="visually-hidden" tabindex="-1" aria-hidden="true">
+       <div class="btn-row">
+        <button type="button" id="vision-take" class="btn primary"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg>Take a photo of text</button>
+        <button type="button" id="vision-cancel" class="btn" hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg>Stop reading</button>
+       </div>
+       <p id="vision-status" class="small muted" role="status"></p>
+       <div id="vision-result" class="latest" hidden tabindex="-1"></div>
+      </details>
      </section>
 
      <section class="details" aria-labelledby="details-title">
@@ -207,9 +260,10 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="sr-alert" class="visually-hidden" role="alert" aria-atomic="true"></div>
+<div id="guide-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
-<script src="vendor/maplibre-gl-4.7.1/maplibre-gl.js"></script>
-<script src="providers.js"></script>
-<script src="app.js"></script>
+<script src="providers.js" defer></script>
+<script src="audio.js" defer></script>
+<script src="app.js" defer></script>
 </body>
 </html>

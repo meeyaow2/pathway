@@ -146,7 +146,7 @@ button{cursor:pointer}
 .menu-item small,.menu-check small{font-weight:var(--weight-regular);color:var(--color-text-muted);font-size:var(--text-xs)}
 .menu-item[aria-pressed=true]{background:var(--color-brand-soft);color:var(--color-text-brand);box-shadow:inset 4px 0 0 var(--color-brand)}
 .menu-check{display:flex;align-items:center;gap:var(--space-2);min-height:var(--tap);padding:0 10px;border-top:1px solid var(--color-border);margin-top:6px;font-size:.9375rem;flex-wrap:wrap}
-.menu-check input{width:22px;height:22px;accent-color:var(--color-brand)}
+.menu.check input{width:24px;height:24px;accent-color:var(--color-brand)}
 
 .banner{position:absolute;z-index:60;top:calc(env(safe-area-inset-top) + 8px);left:50%;transform:translateX(-50%);width:min(92vw,520px);background:var(--color-warning-bg);color:var(--color-warning-text);border:1px solid var(--color-warning-border);border-radius:var(--radius-md);padding:10px 14px;font-weight:var(--weight-semibold);box-shadow:var(--shadow-2)}
 
@@ -311,9 +311,60 @@ html.pw-contrast .chip[aria-pressed=true] small{color:var(--white)}
 @media (prefers-reduced-motion:reduce){ *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important} }
 @media (forced-colors:active){ .chip[aria-pressed=true],.route-card[aria-pressed=true],.fab[aria-pressed=true],.tabbar button[aria-current=page]{outline:3px solid Highlight} }
 
-/* Map loading feedback: visible above the canvas on slow mobile networks. */
-.app{position:relative}
-.map-load-status{position:absolute;z-index:15;left:50%;top:42%;transform:translate(-50%,-50%);max-width:min(330px,calc(100% - 36px));padding:14px 16px;border-radius:12px;background:rgba(252,250,255,.96);box-shadow:0 5px 28px rgba(35,18,58,.15);color:#241b35;text-align:center;font-size:13px;line-height:1.45;border:1px solid #d5c6ec}
+/* Map loading: an instant, zero-request placeholder (soft street grid) + a status card that never blocks planning. */
+.map-placeholder{position:absolute;inset:0;background-color:var(--map-bg);
+ background-image:linear-gradient(90deg,transparent 0 46%,rgba(255,255,255,.75) 46% 49%,transparent 49%),linear-gradient(0deg,transparent 0 62%,rgba(255,255,255,.75) 62% 65%,transparent 65%),
+  linear-gradient(32deg,transparent 0 48%,rgba(201,184,245,.55) 48% 50%,transparent 50%),linear-gradient(90deg,rgba(255,255,255,.35) 1px,transparent 1px),linear-gradient(0deg,rgba(255,255,255,.35) 1px,transparent 1px);
+ background-size:100% 100%,100% 100%,100% 100%,56px 56px,56px 56px}
+.map-load-status{position:absolute;z-index:15;left:50%;top:38%;transform:translate(-50%,-50%);width:max-content;max-width:min(330px,calc(100% - 36px));padding:var(--space-3) var(--space-4);border-radius:var(--radius-md);
+ background:var(--color-surface);box-shadow:var(--shadow-2);color:var(--color-text);text-align:center;font-size:var(--text-sm);border:1px solid var(--color-border)}
 .map-load-status[hidden],.map-load-status button[hidden]{display:none}
-.map-load-status button{margin:8px 4px 0;border:1px solid #6941c6;color:#5326a9;background:#fff;border-radius:7px;min-height:44px;padding:8px 12px;font-weight:650;cursor:pointer}
-.map-load-status button:focus-visible{outline:3px solid #6941c6;outline-offset:3px}
+.map-load-status button{margin:var(--space-2) var(--space-1) 0;border:1px solid var(--color-brand);color:var(--color-text-brand);background:var(--color-surface);border-radius:var(--radius-sm);min-height:44px;padding:var(--space-2) var(--space-3);font-weight:var(--weight-semibold);cursor:pointer}
+@media (min-width:900px){.map-load-status{left:calc(50% + 200px)}}
+.popup-flag{margin:4px 0;color:var(--color-warning-text);font-weight:var(--weight-bold)}
+
+/* ============================== 6. Journey guidance + audio mode ============================== */
+.mode-toggle{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 var(--space-3);border-radius:var(--radius-pill);border:1px solid var(--color-brand);background:var(--color-surface);color:var(--color-text-brand);font-weight:var(--weight-semibold);font-size:var(--text-sm)}
+.mode-toggle .icon{width:18px;height:18px}
+.mode-toggle[aria-pressed=true]{background:var(--color-brand);color:var(--color-text-on-brand)}
+.mode-toggle[aria-pressed=true]::after{content:" on" / "";font-weight:var(--weight-bold)}
+.journey-summary{display:grid;gap:4px;margin:var(--space-2) 0 0}
+.journey-summary div{display:grid;grid-template-columns:4.5em 1fr;gap:var(--space-2)}
+.journey-summary dt{font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+.journey-summary dd{margin:0}
+.latest{font-size:var(--text-md);font-weight:var(--weight-semibold);background:var(--color-brand-soft);border-left:4px solid var(--color-brand);border-radius:var(--radius-sm);padding:var(--space-3);margin:var(--space-3) 0 0}
+.guidance-controls{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);margin:var(--space-3) 0 var(--space-2)}
+.guidance-controls .btn{min-height:56px}
+.guidance-controls .btn[aria-pressed=true]{background:var(--color-brand-soft);border-color:var(--color-brand)}
+.voice-settings{margin-top:var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:0 var(--space-3)}
+.voice-settings summary{min-height:var(--tap);display:flex;align-items:center;font-weight:var(--weight-semibold);cursor:pointer}
+.voice-settings fieldset{border:0;padding:0;margin:var(--space-2) 0}
+.voice-settings legend{font-weight:var(--weight-semibold);padding:0;margin-bottom:4px}
+.check{display:flex;align-items:center;gap:var(--space-2);min-height:var(--tap);flex-wrap:wrap}
+.check input{width:24px;height:24px;accent-color:var(--color-brand);flex:none}
+.check small{color:var(--color-text-muted);font-size:var(--text-xs)}
+.field-inline{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);min-height:var(--tap);font-weight:var(--weight-semibold)}
+.field-inline select{min-height:44px;border:1px solid var(--color-border-strong);border-radius:var(--radius-sm);padding:0 var(--space-2);background:var(--color-surface)}
+.audio-only,.audio-intro{display:none}
+
+/* Audio mode: no map required, one readable column, large controls — at every screen size. */
+.app.audio-mode{display:block;overflow-y:auto;--tabbar-h:64px}
+.app.audio-mode #map,.app.audio-mode .map-fabs,.app.audio-mode .map-load-status,.app.audio-mode .quick-picks{display:none}
+.app.audio-mode.map-visible #map{display:block;position:relative;height:40dvh}
+.app.audio-mode .panel{position:static;display:flex;flex-direction:column;min-height:100dvh;height:auto;max-width:680px;margin:0 auto;background:var(--color-surface);border:0}
+.app.audio-mode .search-card,.app.audio-mode .sheet,.app.audio-mode .tabbar{position:static;width:auto;box-shadow:none;border-radius:0;height:auto}
+.app.audio-mode .search-card{padding:calc(env(safe-area-inset-top) + 12px) var(--space-4) var(--space-3);border-bottom:1px solid var(--color-border)}
+.app.audio-mode .brand-row{display:flex!important}
+.app.audio-mode .status-line{position:static!important;width:auto;height:auto;clip:auto;margin:6px var(--space-1) 0}
+.app.audio-mode .sheet{flex:1}
+.app.audio-mode .sheet-handle{display:none}
+.app.audio-mode .sheet-content{overflow:visible;padding:var(--space-4)}
+.app.audio-mode .tabbar{position:sticky;bottom:0;order:3;height:calc(64px + env(safe-area-inset-bottom));border-top:1px solid var(--color-border);border-bottom:0;box-shadow:none}
+.app.audio-mode .audio-only{display:inline-flex}
+.app.audio-mode .audio-intro{display:block;margin:var(--space-2) 0 0;color:var(--color-text-muted)}
+.app.audio-mode .latest{font-size:var(--text-xl)}
+.app.audio-mode .guidance-controls .btn{min-height:64px;font-size:var(--text-md)}
+.app.audio-mode .toast{bottom:calc(64px + 16px)}
+@media (min-width:900px){ .app.audio-mode .tabbar{order:-1;position:sticky;top:0} }
+.vision details summary{min-height:var(--tap);display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;font-weight:var(--weight-semibold);font-size:var(--text-md);cursor:pointer}
+.vision ul{margin:var(--space-2) 0}
