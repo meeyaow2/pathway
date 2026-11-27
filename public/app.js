@@ -6,12 +6,14 @@ const esc = x => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const SG = {latMin: 1.15, latMax: 1.48, lngMin: 103.59, lngMax: 104.1};
 const inSG = p => p && p.lat >= SG.latMin && p.lat <= SG.latMax && p.lng >= SG.lngMin && p.lng <= SG.lngMax;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Colours come from the design tokens in styles.css (so high-contrast mode restyles the map too).
+const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /* ------------------------------------------------------------ preferences */
 // status: 'applied' changes routing/ranking, 'display' changes presentation, 'data' needs datasets Pathway doesn't have yet.
 const PREF_GROUPS = [
  {title: 'Physical access', items: [
-  ['stepfree', 'Step-free route', 'applied'], ['avoidstairs', 'Avoid stairs', 'applied'], ['lifts', 'Prefer lifts', 'applied'],
+  ['stepfree', 'Wheelchair-profile routing', 'applied'], ['avoidstairs', 'Avoid stairs', 'applied'], ['lifts', 'Prefer lifts', 'applied'],
   ['ramps', 'Accessible ramps', 'data'], ['crossings', 'Accessible crossings', 'data'], ['slopes', 'Gentle slopes and kerbs', 'data']]},
  {title: 'Comfort', items: [
   ['shorter', 'Shorter walking distance', 'applied'], ['simpler', 'Fewer turns', 'applied'],
@@ -59,18 +61,8 @@ function speak(text, force = false) {
 }
 function buzz(pattern) { if (state.prefs.vibrate && navigator.vibrate) try { navigator.vibrate(pattern); } catch {} }
 
-async function api(path, options = {}) {
- if (!navigator.onLine) throw Error('You’re offline. Reconnect to search and get routes.');
- const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), options.timeout || 25000);
- let res;
- try { res = await fetch(path, {...options, signal: ctrl.signal}); }
- catch (e) { throw Error(e.name === 'AbortError' ? 'The request took too long. Please try again.' : 'Can’t reach Pathway’s server. Check your connection.'); }
- finally { clearTimeout(timer); }
- let data = {};
- try { data = await res.json(); } catch { if (!res.ok) throw Error('The server returned an unexpected response (' + res.status + ').'); }
- if (!res.ok) { const err = Error(data.error || 'Request failed (' + res.status + ').'); err.status = res.status; throw err; }
- return data;
-}
+const P = window.PathwayProviders;
+const reportStore = new P.LocalReportStore(); // swap for a backend store later; same list/add/remove interface
 const fmtDist = m => { const n = Number(m); return !Number.isFinite(n) ? '—' : n >= 1000 ? (n / 1000).toFixed(1) + ' km' : Math.round(n) + ' m'; };
 const fmtTime = s => { const n = Number(s); if (!Number.isFinite(n) || n <= 0) return '—'; const m = Math.max(1, Math.round(n / 60)); return m >= 60 ? Math.floor(m / 60) + ' hr ' + (m % 60) + ' min' : m + ' min'; };
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
@@ -81,7 +73,7 @@ const STYLES = {
  liberty: 'https://tiles.openfreemap.org/styles/liberty',
  positron: 'https://tiles.openfreemap.org/styles/positron',
  onemap: {version: 8, sources: {onemap: {type: 'raster', tiles: ['https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png'], tileSize: 256, minzoom: 11, maxzoom: 19, bounds: [103.596, 1.1443, 104.1, 1.4835], attribution: ONEMAP_ATTR}},
-  layers: [{id: 'bg', type: 'background', paint: {'background-color': '#e8eeec'}}, {id: 'onemap', type: 'raster', source: 'onemap'}]},
+  layers: [{id: 'bg', type: 'background', paint: {'background-color': '#ECE8F2'}}, {id: 'onemap', type: 'raster', source: 'onemap'}]},
 };
 let map = null, markerA = null, markerB = null, gpsMarker = null;
 
@@ -102,7 +94,7 @@ function setupMap() {
   const f = e.features && e.features[0]; if (!f) return;
   const el = document.createElement('div');
   const h = document.createElement('strong'); h.textContent = f.properties.category;
-  const flag = document.createElement('p'); flag.textContent = 'Unverified community report'; flag.style.cssText = 'margin:4px 0;color:#6b3a00;font-weight:700';
+  const flag = document.createElement('p'); flag.textContent = 'Local demo report (this device only)'; flag.style.cssText = 'margin:4px 0;color:#6b3a00;font-weight:700';
   const d = document.createElement('p'); d.textContent = f.properties.location + ' — ' + f.properties.description; d.style.margin = '0';
   el.append(h, flag, d);
   new maplibregl.Popup({offset: 12}).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
@@ -116,12 +108,19 @@ function addOverlays() {
  if (!map.getSource('routes')) map.addSource('routes', {type: 'geojson', data: empty});
  if (!map.getSource('reports')) map.addSource('reports', {type: 'geojson', data: empty});
  const add = layer => { if (!map.getLayer(layer.id)) map.addLayer(layer); };
- add({id: 'route-alt', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], false], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': '#7d8f89', 'line-width': 5, 'line-opacity': .75}});
- add({id: 'route-casing', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], true], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': '#ffffff', 'line-width': 10}});
- add({id: 'route-main', type: 'line', source: 'routes', filter: ['all', ['==', ['get', 'selected'], true], ['!', ['get', 'illustrative']]], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': '#0b5d53', 'line-width': 6}});
- add({id: 'route-illustrative', type: 'line', source: 'routes', filter: ['all', ['==', ['get', 'selected'], true], ['get', 'illustrative']], layout: {'line-cap': 'round'}, paint: {'line-color': '#0b5d53', 'line-width': 5, 'line-dasharray': [1, 2]}});
- add({id: 'reports-circle', type: 'circle', source: 'reports', paint: {'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 16, 9], 'circle-color': '#c2410c', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2.5}});
+ // Alternative = thinner, dashed, grey-violet; selected = solid purple with a white casing (pattern + width, not colour alone).
+ add({id: 'route-alt', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], false], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': token('--map-route-alt'), 'line-width': 4, 'line-dasharray': [1.5, 1.5]}});
+ add({id: 'route-casing', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], true], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': token('--map-route-casing'), 'line-width': 10}});
+ add({id: 'route-main', type: 'line', source: 'routes', filter: ['all', ['==', ['get', 'selected'], true], ['!', ['get', 'illustrative']]], layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': token('--map-route'), 'line-width': 6}});
+ add({id: 'route-illustrative', type: 'line', source: 'routes', filter: ['all', ['==', ['get', 'selected'], true], ['get', 'illustrative']], layout: {'line-cap': 'round'}, paint: {'line-color': token('--map-route'), 'line-width': 5, 'line-dasharray': [1, 2]}});
+ add({id: 'reports-circle', type: 'circle', source: 'reports', paint: {'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 16, 9], 'circle-color': token('--map-report'), 'circle-stroke-color': token('--map-pin-border'), 'circle-stroke-width': 2.5}});
  drawRoutes(false); drawReports();
+}
+function restyleMap() { // re-read tokens, e.g. after high-contrast mode changes
+ if (!map || !map.getLayer('route-main')) return;
+ map.setPaintProperty('route-alt', 'line-color', token('--map-route-alt'));
+ map.setPaintProperty('route-main', 'line-color', token('--map-route'));
+ map.setPaintProperty('route-illustrative', 'line-color', token('--map-route'));
 }
 function drawRoutes(fit = true) {
  if (!map || !map.getSource('routes')) return;
@@ -145,7 +144,7 @@ function drawMarkers() {
   if (!p) { if (m) m.remove(); m = null; }
   else {
    const aria = (which === 'start' ? 'Start: ' : 'Destination: ') + p.name;
-   if (!m) m = new maplibregl.Marker({element: pin(label, cls, aria), anchor: 'bottom'});
+   if (!m) m = new maplibregl.Marker({element: pin(label, cls, aria), anchor: which === 'start' ? 'center' : 'bottom'});
    m.getElement().setAttribute('aria-label', aria);
    m.setLngLat([p.lng, p.lat]).setPopup(new maplibregl.Popup({offset: 24}).setText(aria)).addTo(map);
   }
@@ -227,10 +226,10 @@ function setupCombo(which) {
  };
  const choose = r => { close(); selectPlace(which, r); };
  const run = async () => {
-  const q = input.value.trim(); if (q.length < 2) { close(); return; }
+  const q = input.value.trim(); if (q.length < 3) { close(); return; }
   const seq = ++c.seq; $('address-status').textContent = 'Searching…';
   try {
-   const data = await api('/api/search?q=' + encodeURIComponent(q));
+   const data = await P.search(q);
    if (seq !== c.seq) return;
    c.items = data.results || []; c.active = -1; render();
    $('address-status').textContent = c.items.length ? plural(c.items.length, 'suggestion', 'suggestions') + '. Use the up and down arrows or tap one to choose.' : 'No matches found.';
@@ -240,7 +239,7 @@ function setupCombo(which) {
  input.addEventListener('input', () => {
   if (state[which]) { state[which] = null; clearRoutes(); drawMarkers(); }
   clearTimeout(c.timer); c.seq++;
-  if (input.value.trim().length >= 2) c.timer = setTimeout(run, 300); else { close(); $('address-status').textContent = ''; }
+  if (input.value.trim().length >= 3) c.timer = setTimeout(run, 350); else { close(); $('address-status').textContent = ''; }
  });
  input.addEventListener('keydown', e => {
   const isOpen = !list.classList.contains('hidden') && c.items.length;
@@ -311,7 +310,7 @@ function clearRoutes() {
 }
 function recommendIndex(routes) {
  const p = state.prefs, physical = p.stepfree || p.avoidstairs;
- const score = r => (p.stepfree && r.profile !== 'stepfree' ? 1e6 : 0) + (physical ? r.counts.stairs * 1e4 : 0) +
+ const score = r => (p.stepfree && r.profile !== 'wheelchair' ? 1e6 : 0) + (physical ? r.counts.stairs * 1e4 : 0) +
   (p.shorter ? r.distance_m : 0) + (p.simpler ? r.steps.length * 60 : 0) + r.duration_s / 10;
  let best = 0; routes.forEach((r, i) => { if (score(r) < score(routes[best])) best = i; }); return best;
 }
@@ -323,8 +322,7 @@ async function planRoutes() {
  $('routes').setAttribute('aria-busy', 'true'); $('routes').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
  setSheet('half');
  try {
-  const params = new URLSearchParams({start: state.start.lat + ',' + state.start.lng, end: state.end.lat + ',' + state.end.lng, lifts: state.prefs.lifts ? '1' : '0'});
-  const data = await api('/api/routes?' + params);
+  const data = await P.compareRoutes(state.start, state.end, {preferLifts: !!state.prefs.lifts});
   state.routes = data.routes; state.selected = recommendIndex(state.routes);
   app.classList.add('has-route');
   const r = state.routes[state.selected];
@@ -364,9 +362,9 @@ function renderRoutes() {
   const tag = state.routes.length > 1 && i === rec ? '<span class="tag">' + (physical ? 'Best match for your needs' : 'Fastest') + '</span>' : '';
   const warn = (r.warnings || []).map(w => '<div class="warn">' + esc(w) + '</div>').join('');
   return '<button type="button" class="route-card" data-route="' + i + '" aria-pressed="' + (i === state.selected) + '">' +
-   '<span class="top"><span class="label">' + esc(r.label) + '</span><span class="time">' + (r.illustrative ? '—' : esc(fmtTime(r.duration_s))) + '</span></span>' +
+   '<span class="top"><span class="label">' + esc(r.label) + '<span class="selected-mark" aria-hidden="true">✓ Selected</span></span><span class="time">' + (r.illustrative ? '—' : esc(fmtTime(r.duration_s))) + '</span></span>' +
    '<span class="meta">' + meta.map(m => '<span>' + esc(m) + '</span>').join('') + '</span>' +
-   (r.illustrative ? '' : '<span class="meta"><span>Counts from map data · accessibility unverified</span></span>') + tag + warn + '</button>';
+   (r.illustrative ? '' : '<span class="meta"><span>' + esc(r.note) + ' Stairs and lifts counted from map data.</span></span>') + tag + warn + '</button>';
  }).join('');
  qs('[data-route]', box).forEach(b => b.addEventListener('click', () => {
   state.selected = Number(b.dataset.route); refreshJourneyRoute(); renderRoutes(); drawRoutes();
@@ -484,7 +482,7 @@ $('journey-recalculate').addEventListener('click', async () => {
  if (!inSG(here)) return toast('Your location appears to be outside Singapore.');
  $('journey-recalculate').disabled = true;
  try {
-  const data = await api('/api/routes?' + new URLSearchParams({start: here.lat + ',' + here.lng, end: state.end.lat + ',' + state.end.lng, lifts: state.prefs.lifts ? '1' : '0'}));
+  const data = await P.compareRoutes(here, state.end, {preferLifts: !!state.prefs.lifts});
   const profile = state.routes[state.selected]?.profile;
   state.start = here; $('start-search').value = here.name; state.routes = data.routes;
   state.selected = Math.max(0, state.routes.findIndex(r => r.profile === profile));
@@ -512,6 +510,7 @@ function togglePref(k, value) {
 function applyDisplay() {
  document.documentElement.classList.toggle('pw-large', !!state.prefs.large);
  document.documentElement.classList.toggle('pw-contrast', !!state.prefs.contrast);
+ restyleMap();
  qs('[data-access]').forEach(b => b.setAttribute('aria-pressed', String(!!state.access[b.dataset.access])));
  const missing = PREF_GROUPS.flatMap(g => g.items).filter(([k, , st]) => st === 'data' && state.prefs[k]).map(([, l]) => l.toLowerCase());
  $('accessibility-note').textContent = (missing.length ? 'Not applied yet, because reliable Singapore data isn’t connected: ' + missing.join(', ') + '. ' : '') +
@@ -596,22 +595,23 @@ $('report-form').addEventListener('submit', async e => {
  const payload = {location: $('where').value.trim(), category: $('category').value, description: $('description').value.trim(), ...(pos || {})};
  const btn = $('submit-report'); btn.disabled = true; btn.setAttribute('aria-busy', 'true');
  try {
-  await api('/api/reports', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-  $('report-form').reset(); closeModal(); changePage('reports', false); toast('Thanks. Your report was submitted as unverified.');
- } catch (err) { toast(err.message); alertSR('Report not sent. ' + err.message); }
+  await reportStore.add(payload);
+  $('report-form').reset(); closeModal(); changePage('reports', false); toast('Demo report saved on this device only. It isn’t shared with anyone.');
+ } catch (err) { toast(err.message); alertSR('Demo report not saved. ' + err.message); }
  finally { btn.disabled = false; btn.removeAttribute('aria-busy'); }
 });
 async function loadReports() {
  const list = $('report-list');
  if (!list.children.length) list.innerHTML = '<div class="skeleton"></div>';
  try {
-  const data = await api('/api/reports'); state.reports = data.reports || [];
-  $('storage-note').classList.toggle('hidden', data.storage_persistent !== false);
+  state.reports = await reportStore.list();
   $('report-count').textContent = state.reports.length;
-  const STATUS = {unverified: 'Unverified', under_review: 'Under review', resolved: 'Reported resolved'};
+  const STATUS = {local_demo: 'Local demo', unverified: 'Unverified', under_review: 'Under review', resolved: 'Reported resolved'};
   list.innerHTML = state.reports.length ? state.reports.map(x => '<div class="item"><div><strong>' + esc(x.category) + '</strong><p>' + esc(x.location) + ' · ' + esc(new Date(x.created_at * 1000).toLocaleDateString('en-SG')) + '</p><p class="muted">' + esc(x.description) + '</p></div><div class="actions"><span class="flag">' + esc(STATUS[x.status] || 'Unverified') + '</span>' +
-   (Number.isFinite(x.lat) ? '<button type="button" class="btn" data-show="' + esc(x.id) + '" aria-label="Show ' + esc(x.category) + ' report on the map">Map</button>' : '') + '</div></div>').join('')
-   : '<p class="notice">No reports yet. If you spot an obstacle, use the warning button on the map to report it.</p>';
+   (Number.isFinite(x.lat) ? '<button type="button" class="btn" data-show="' + esc(x.id) + '" aria-label="Show ' + esc(x.category) + ' demo report on the map">Map</button>' : '') +
+   '<button type="button" class="btn" data-delete="' + esc(x.id) + '" aria-label="Delete ' + esc(x.category) + ' demo report">Delete</button></div></div>').join('')
+   : '<p class="notice">No demo reports yet. Use the warning button on the map to try reporting an obstacle. Reports stay on this device.</p>';
+  qs('[data-delete]', list).forEach(b => b.addEventListener('click', async () => { await reportStore.remove(b.dataset.delete); toast('Demo report deleted.'); await loadReports(); $('reports-heading').focus(); }));
   qs('[data-show]', list).forEach(b => b.addEventListener('click', () => {
    const r = state.reports.find(x => x.id === b.dataset.show); if (!r || !map) return;
    setSheet('peek'); map.easeTo({center: [r.lng, r.lat], zoom: 17, duration: reducedMotion ? 0 : 500});
@@ -636,12 +636,6 @@ addEventListener('online', () => { connectivity(); toast('Back online.'); }); ad
 async function startup() {
  ['liberty', 'positron', 'onemap'].forEach(s => $('provider-' + s).setAttribute('aria-pressed', String(s === state.mapStyle)));
  connectivity(); renderPrefs(); setupMap(); renderRoutes(); refreshJourneyRoute(); setSheet('peek');
- try {
-  const s = state.status = await api('/api/status', {timeout: 10000});
-  $('service-mode').textContent = 'ACCESS UNVERIFIED';
-  $('provider-info').textContent = 'Map: OpenFreeMap / OneMap © Singapore Land Authority · Search: ' + (s.onemap_configured ? 'OneMap, with Photon as backup' : 'Photon (komoot)') +
-   ' · Routing: ' + (s.routing_provider.startsWith('onemap') ? 'OneMap walking + Valhalla step-free' : 'Valhalla (FOSSGIS)') + ' · Data © OpenStreetMap contributors.';
- } catch { $('address-status').textContent = 'Pathway’s server is unreachable. Search and routing may not work.'; }
  loadReports();
 }
 window.__pathway = {state, getMap: () => map}; // read-only hook for automated tests

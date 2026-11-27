@@ -1,8 +1,10 @@
-// End-to-end browser test. Run: python server.py (or PATHWAY_URL=...) then `node tests/e2e.js`.
-// Uses live free providers (Photon, Valhalla) through Pathway's backend. Optional: AXE_PATH=/path/to/axe.min.js
+// End-to-end browser test of the static site (as on GitHub Pages, under /pathway/).
+// Serve it:  mkdir -p /tmp/site && ln -sfn "$PWD/public" /tmp/site/pathway && python3 -m http.server 8765 -d /tmp/site
+// Then:      node tests/e2e.js      (or PATHWAY_URL=https://meeyaow2.github.io/pathway/ node tests/e2e.js)
+// Calls the live free providers (Photon, Valhalla) directly from the browser. Optional: AXE_PATH=/path/to/axe.min.js
 const {chromium, devices} = require('playwright');
 const fs = require('fs'), path = require('path');
-const URL_ = process.env.PATHWAY_URL || 'http://127.0.0.1:8765';
+const URL_ = process.env.PATHWAY_URL || 'http://127.0.0.1:8765/pathway/';
 const OUT = process.env.SHOT_DIR || path.join(__dirname, 'screenshots');
 const AXE = process.env.AXE_PATH;
 const results = []; const ok = (name, pass, info = '') => { results.push({name, pass, info}); console.log((pass ? 'PASS ' : 'FAIL ') + name + (info ? ' — ' + info : '')); };
@@ -21,7 +23,8 @@ async function pick(page, which, query, how = 'keyboard') {
   const browser = await chromium.launch();
   // ---------------- core journey on an iPhone-sized touch device
   const ctx = await browser.newContext({...devices['iPhone 13'], permissions: ['geolocation'], geolocation: ORCHARD});
-  const page = await ctx.newPage(); const errors = [];
+  const page = await ctx.newPage(); const errors = [], apiCalls = [];
+  page.on('request', r => { if (/\/api\//.test(new URL(r.url()).pathname) && new URL(r.url()).origin === new URL(URL_).origin) apiCalls.push(r.url()); });
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(URL_, {waitUntil: 'networkidle'});
@@ -35,7 +38,7 @@ async function pick(page, which, query, how = 'keyboard') {
   const st = await page.evaluate(() => { const s = window.__pathway.state, m = window.__pathway.getMap(); const src = m && m.getSource('routes'); return {routes: s.routes.map(r => ({p: r.profile, d: r.distance_m, t: r.duration_s, pts: r.geometry.length, steps: r.steps.length, stairs: r.counts.stairs})), drawn: !!(src && src._data && src._data.features && src._data.features.length)}; });
   ok('route geometry decoded and drawn on map', st.drawn && st.routes.every(r => r.pts > 10), JSON.stringify(st.routes));
   ok('walking instructions listed', await page.locator('#steps li').count() > 2, (await page.locator('#steps li').first().innerText()).replace(/\s+/g, ' '));
-  ok('step-free profile avoids mapped stairs', (st.routes.find(r => r.p === 'stepfree') || {}).stairs === 0);
+  ok('wheelchair profile avoids mapped stairs', (st.routes.find(r => r.p === 'wheelchair') || {}).stairs === 0);
   await page.screenshot({path: path.join(OUT, 'mobile-390-route.png')});
 
   // GPS follow + progress + reroute
@@ -76,11 +79,15 @@ async function pick(page, which, query, how = 'keyboard') {
   await page.fill('#description', 'Lift out of service, sign says repair this week');
   await page.locator('#submit-report').click();
   await page.waitForSelector('#report-list .item', {timeout: 15000});
-  ok('report submitted and listed as unverified', /Unverified/.test(await page.locator('#report-list').innerText()));
+  ok('demo report saved and labelled local', /Local demo/.test(await page.locator('#report-list').innerText()) && /only in this browser/.test(await page.locator('#storage-note').innerText()));
   const mapped = await page.evaluate(() => window.__pathway.getMap().getSource('reports')._data.features.length);
   ok('report shown on map', mapped >= 1, mapped + ' feature(s)');
-  const codes = await page.evaluate(async () => { const out = []; for (let i = 0; i < 6; i++) { const r = await fetch('/api/reports', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({location: 'Test spot', category: 'Other access issue', description: 'Rate limit test entry'})}); out.push(r.status); } return out; });
-  ok('report rate limiting', codes.includes(429), codes.join(','));
+  await page.reload({waitUntil: 'networkidle'}); await page.locator('.tabbar [data-page=reports]').tap();
+  await page.waitForSelector('#report-list .item', {timeout: 10000});
+  ok('demo report persists on this device after reload', await page.locator('#report-list .item').count() === 1);
+  await page.locator('[data-delete]').first().click();
+  ok('demo report can be deleted', await page.locator('#report-list .item').count() === 0);
+  ok('no calls to a backend /api', apiCalls.length === 0, apiCalls.join(' '));
   ok('no JavaScript errors in journey', errors.filter(e => !/tiles|Failed to load resource/.test(e)).length === 0, errors.join(' | '));
   await ctx.close();
 
@@ -97,10 +104,10 @@ async function pick(page, which, query, how = 'keyboard') {
   ok('aria-activedescendant tracks arrow keys', (await k.getAttribute('#start-search', 'aria-activedescendant')) === 'start-opt-1');
   await k.keyboard.press('Escape'); ok('Escape closes suggestions', await k.getAttribute('#start-search', 'aria-expanded') === 'false');
   // API failure handling
-  await k.route('**/api/routes**', r => r.fulfill({status: 503, contentType: 'application/json', body: JSON.stringify({error: 'Valhalla routing is unreachable. Check your connection and try again.'})}));
+  await k.route('**/valhalla1.openstreetmap.de/**', r => r.fulfill({status: 503, contentType: 'application/json', headers: {'access-control-allow-origin': '*'}, body: '{}'}));
   await k.evaluate(() => { const s = window.__pathway.state; s.start = {name: 'A', lat: 1.3046, lng: 103.8318}; s.end = {name: 'B', lat: 1.3004, lng: 103.839}; });
   await k.click('#plan'); await k.waitForSelector('.route-card', {timeout: 10000});
-  ok('routing failure falls back to labelled illustration', /Straight-line illustration/.test(await k.locator('#routes').innerText()) && /unreachable/.test(await k.locator('#toast').innerText()));
+  ok('routing failure falls back to labelled illustration', /Straight-line illustration/.test(await k.locator('#routes').innerText()) && /routing service/i.test(await k.locator('#toast').innerText()));
   await kctx.setOffline(true); await k.evaluate(() => dispatchEvent(new Event('offline')));
   ok('offline banner', await k.locator('#offline-banner').isVisible());
   await kctx.close();
@@ -130,9 +137,22 @@ async function pick(page, which, query, how = 'keyboard') {
     await p.screenshot({path: path.join(OUT, name + '.png')});
     if (axeSrc) {
       await p.addScriptTag({content: axeSrc});
-      const v = await p.evaluate(async () => (await axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa'], exclude: [['.maplibregl-canvas-container']]})).violations.map(x => x.id + '(' + x.nodes.length + '): ' + x.nodes.slice(0, 2).map(n => n.target.join(' ')).join('; ')));
-      ok(name + ': axe WCAG 2.1 AA', v.length === 0, v.join(' | '));
+      const v = await p.evaluate(async () => (await axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'], exclude: [['.maplibregl-canvas-container']]})).violations.map(x => x.id + '(' + x.nodes.length + '): ' + x.nodes.slice(0, 2).map(n => n.target.join(' ')).join('; ')));
+      ok(name + ': axe WCAG 2.2 AA', v.length === 0, v.join(' | '));
     }
+    await c.close();
+  }
+  // High-contrast mode still works and passes automated checks
+  if (axeSrc) {
+    const c = await browser.newContext({viewport: {width: 390, height: 844}, hasTouch: true, isMobile: true, bypassCSP: true});
+    const p = await c.newPage(); await p.goto(URL_, {waitUntil: 'networkidle'});
+    await p.locator('#sheet-handle').click(); await p.locator('#sheet-handle').click();
+    await p.locator('[data-pref=contrast]').click();
+    ok('high-contrast mode applies', await p.evaluate(() => document.documentElement.classList.contains('pw-contrast')));
+    await p.screenshot({path: path.join(OUT, 'mobile-390-high-contrast.png')});
+    await p.addScriptTag({content: axeSrc});
+    const v = await p.evaluate(async () => (await axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'], exclude: [['.maplibregl-canvas-container']]})).violations.map(x => x.id));
+    ok('high contrast: axe WCAG 2.2 AA', v.length === 0, v.join(', '));
     await c.close();
   }
   await browser.close();

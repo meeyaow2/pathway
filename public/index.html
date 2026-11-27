@@ -3,10 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b5d53">
-<meta name="description" content="Pathway: accessibility-first walking routes in Singapore. Compare step-free and standard routes, with honest information about what is and isn't verified.">
+<meta name="theme-color" content="#6941C6">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://www.onemap.gov.sg; connect-src 'self' https://photon.komoot.io https://valhalla1.openstreetmap.de https://tiles.openfreemap.org https://www.onemap.gov.sg; worker-src 'self' blob:; child-src blob:; font-src 'self'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="description" content="Pathway: accessibility-first walking routes in Singapore. Compare wheelchair-profile and standard walking routes, with honest information about what is and isn't verified.">
 <title>Pathway — accessible walking routes in Singapore</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b5d53'/%3E%3Cpath d='M9 23c4-1 4-6 7-8s7-1 7-6' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='23' r='2.5' fill='%23ffc35c'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236941C6'/%3E%3Cpath d='M9 23c4-1 4-6 7-8s7-1 7-6' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='23' r='2.5' fill='%23F2EDFF'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -49,7 +51,7 @@
    <button type="button" id="provider-liberty" class="menu-item" aria-pressed="true">Streets <small>OpenFreeMap</small></button>
    <button type="button" id="provider-positron" class="menu-item" aria-pressed="false">Minimal <small>OpenFreeMap</small></button>
    <button type="button" id="provider-onemap" class="menu-item" aria-pressed="false">OneMap <small>Singapore Land Authority</small></button>
-   <label class="menu-check"><input type="checkbox" id="show-reports" checked> Show barrier reports <small>(unverified)</small></label>
+   <label class="menu-check"><input type="checkbox" id="show-reports" checked> Show demo barrier reports <small>(this device only)</small></label>
   </div>
  </div>
 
@@ -76,7 +78,7 @@
      </div>
      <div id="end-suggestions" class="suggestions hidden" role="listbox" aria-label="Destination suggestions"></div>
     </div>
-    <p id="search-help" class="visually-hidden">Type at least 2 characters, such as a street address, a six-digit postal code, a building or a landmark. Use the arrow keys to choose a suggestion.</p>
+    <p id="search-help" class="visually-hidden">Type at least 3 characters, such as a street address, a six-digit postal code, a building or a landmark. Use the arrow keys to choose a suggestion.</p>
    </form>
    <p class="status-line" id="address-status" role="status" aria-live="polite"></p>
    <div class="quick-picks" id="demo-fields" role="group" aria-label="Sample places">
@@ -141,10 +143,9 @@
     </section>
 
     <section id="reports" class="page hidden" aria-labelledby="reports-heading">
-     <div class="row-between"><h2 class="h2" id="reports-heading">Barrier reports</h2><button type="button" class="btn primary" id="new-report">New report</button></div>
-     <p class="muted">Community observations. Every report is <strong>unverified</strong> and never changes routes automatically.</p>
-     <div class="stats"><div class="stat"><strong id="report-count">0</strong><small>Reports shown</small></div><div class="stat"><strong>0</strong><small>Independently verified</small></div></div>
-     <p class="callout small hidden" id="storage-note">Reports on this preview are stored temporarily and may disappear. A persistent database hasn't been connected.</p>
+     <div class="row-between"><h2 class="h2" id="reports-heading" tabindex="-1">Barrier reports <span class="flag">DEMO</span></h2><button type="button" class="btn primary" id="new-report">Try a report</button></div>
+     <p class="callout small" id="storage-note"><strong>Local demonstration.</strong> Reports you add are saved only in this browser on this device. They aren’t sent to anyone, aren’t shared with other users and never change routes.</p>
+     <div class="stats"><div class="stat"><strong id="report-count">0</strong><small>Demo reports on this device</small></div><div class="stat"><strong>0</strong><small>Live community reports (not connected yet)</small></div></div>
      <div class="list" id="report-list" aria-live="polite"></div>
     </section>
 
@@ -159,12 +160,13 @@
      <p>Pathway helps people with different access needs compare walking routes in Singapore, and is honest about what is known and what still needs verifying.</p>
      <h3 class="h3">What the data can and can't tell you</h3>
      <ul class="plain">
-      <li><strong>Step-free route:</strong> uses OpenStreetMap's community-mapped steps, lifts and footpaths through the free Valhalla router. Gaps in map data are possible.</li>
-      <li><strong>Not yet available:</strong> live lift status, kerb heights, slope gradients, shelter, tactile paving, rest seating and crossing safety. Pathway shows these as <em>unknown</em>, never as safe.</li>
-      <li><strong>Community reports</strong> are shown on the map as unverified observations.</li>
+      <li><strong>Wheelchair-profile route:</strong> computed by the free Valhalla router to avoid steps recorded in OpenStreetMap. It's a <em>computed</em> route, not a <em>verified</em> accessible one: map data can be missing or out of date.</li>
+      <li><strong>Not yet available:</strong> live lift status, kerb heights, slope gradients, ramps, shelter, tactile paving, rest seating and crossing safety. Pathway shows these as <em>unknown</em>, never as safe.</li>
+      <li><strong>Barrier reports</strong> are a local demonstration. They stay in your browser and aren't shared.</li>
+      <li><strong>Privacy:</strong> there's no Pathway server. Searches and route requests go directly from your browser to Photon and Valhalla. Your GPS position is used only on your device.</li>
      </ul>
      <h3 class="h3">Sources</h3>
-     <p class="small muted" id="provider-info">Map: OpenFreeMap / OneMap © Singapore Land Authority · Search: Photon (komoot), or OneMap when connected · Routing: Valhalla (FOSSGIS) · Data © OpenStreetMap contributors.</p>
+     <p class="small muted" id="provider-info">Map: OpenFreeMap / OpenMapTiles, or OneMap © Singapore Land Authority · Search: Photon by komoot · Routing: Valhalla (FOSSGIS public server, best effort, no uptime guarantee) · Data © OpenStreetMap contributors.</p>
      <p class="callout">Pathway is a prototype. Don't rely on it as your only aid for independent navigation or for real-time safety information.</p>
     </section>
    </div>
@@ -181,8 +183,8 @@
 
 <div class="modal-shell hidden" id="modal">
  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-desc">
-  <div class="row-between"><h2 class="h2" id="modal-title">Report an obstacle</h2><button type="button" class="icon-btn" id="close-modal" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button></div>
-  <p class="muted small" id="modal-desc">Reports stay unverified until reviewed. Don't include personal information or photos of people.</p>
+  <div class="row-between"><h2 class="h2" id="modal-title">Report an obstacle (demo)</h2><button type="button" class="icon-btn" id="close-modal" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button></div>
+  <p class="muted small" id="modal-desc">This is a demonstration: your report is saved only in this browser and isn't shared with anyone. Don't include personal information.</p>
   <form id="report-form" novalidate>
    <div class="field"><label for="where">Where is it?</label><input id="where" required minlength="3" maxlength="120" placeholder="e.g. Lift at Exit B, Orchard MRT" autocomplete="off"></div>
    <div class="field"><label for="report-pin">Map position</label>
@@ -190,7 +192,7 @@
    <div class="field"><label for="category">Barrier type</label><select id="category"><option>Lift not working</option><option>Steps / no ramp</option><option>Blocked footpath</option><option>Steep slope</option><option>Uneven pavement</option><option>Crossing difficult</option><option>No shelter</option><option>Other access issue</option></select></div>
    <div class="field"><label for="description">What did you notice?</label><textarea id="description" required minlength="10" maxlength="1000" rows="4" aria-describedby="description-hint description-error"></textarea>
     <p class="small muted" id="description-hint">At least 10 characters.</p><p class="field-error hidden" id="description-error"></p></div>
-   <div class="btn-row end"><button type="button" class="btn" id="cancel-report">Cancel</button><button type="submit" class="btn primary" id="submit-report">Submit report</button></div>
+   <div class="btn-row end"><button type="button" class="btn" id="cancel-report">Cancel</button><button type="submit" class="btn primary" id="submit-report">Save demo report</button></div>
   </form>
  </div>
 </div>
@@ -199,6 +201,7 @@
 <div id="sr-alert" class="visually-hidden" role="alert" aria-atomic="true"></div>
 
 <script src="vendor/maplibre-gl-4.7.1/maplibre-gl.js"></script>
+<script src="providers.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

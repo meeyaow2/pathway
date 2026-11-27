@@ -1,26 +1,8 @@
-# Local configuration and secrets
-.env
-.env.*
-!.env.example
-
-# Local data
-*.sqlite3
-*.sqlite3-journal
-*.sqlite3-shm
-*.sqlite3-wal
-*.db
-
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
 # Editor and OS
 .DS_Store
 Thumbs.db
 .vscode/
 
-# Test output
+# Test output and tooling
 tests/screenshots/
 node_modules/
