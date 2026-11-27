@@ -76,18 +76,53 @@ const STYLES = {
   layers: [{id: 'bg', type: 'background', paint: {'background-color': '#ECE8F2'}}, {id: 'onemap', type: 'raster', source: 'onemap'}]},
 };
 let map = null, markerA = null, markerB = null, gpsMarker = null;
+let mapLoadTimer = null;
+let mapHasRendered = false;
+function mapLoading(message, actionable = false) {
+ const panel = $('map-load-status');
+ if (!panel) return;
+ panel.hidden = false;
+ $('map-load-message').textContent = message;
+ $('map-retry').hidden = !actionable;
+ $('map-try-onemap').hidden = !actionable || state.mapStyle === 'onemap';
+}
+function mapReady() {
+ mapHasRendered = true;
+ clearTimeout(mapLoadTimer);
+ const panel = $('map-load-status'); if (panel) panel.hidden = true;
+}
+function mapTimeout() {
+ if (!mapHasRendered) mapLoading('The map is taking longer than expected. You can retry or use Singapore OneMap. Search and route information remain available.', true);
+}
+$('map-retry').addEventListener('click', () => {
+ if (!map) return setupMap();
+ mapHasRendered = false;mapLoading('Retrying map tiles…');
+ map.setStyle(STYLES[state.mapStyle]);
+ clearTimeout(mapLoadTimer);mapLoadTimer = setTimeout(mapTimeout, 9000);
+});
+$('map-try-onemap').addEventListener('click', () => { selectStyle('onemap'); });
+
 
 function setupMap() {
  if (!window.maplibregl) { $('map').innerHTML = '<div class="map-fallback"><p>The map couldn’t load. Directions are still listed as text in the journey panel.</p></div>'; return; }
  $('map').innerHTML = '';
+ mapHasRendered = false;
+ mapLoading('Loading Singapore map…');
+ clearTimeout(mapLoadTimer);
+ mapLoadTimer = setTimeout(mapTimeout, 9000);
  try {
-  map = new maplibregl.Map({container: 'map', style: STYLES[state.mapStyle] || STYLES.liberty, center: [103.8318, 1.3046], zoom: 14,
-   minZoom: 10, maxZoom: 19, maxBounds: [[103.3, 1.0], [104.5, 1.7]], attributionControl: {compact: true}, dragRotate: false, pitchWithRotate: false});
- } catch (e) { $('map').innerHTML = '<div class="map-fallback"><p>This browser can’t display the interactive map (WebGL unavailable). Directions are still listed as text.</p></div>'; map = null; return; }
+  const mobile = matchMedia('(max-width: 700px)').matches;
+  map = new maplibregl.Map({container: 'map', style: STYLES[state.mapStyle] || STYLES.liberty, center: [103.8318, 1.3046], zoom: mobile ? 12.5 : 13.5,
+   minZoom: 10, maxZoom: 19, maxBounds: [[103.3, 1.0], [104.5, 1.7]], attributionControl: {compact: true}, dragRotate: false, pitchWithRotate: false,
+   pixelRatio: Math.min(window.devicePixelRatio || 1, mobile ? 1.25 : 1.75),
+   fadeDuration: 0, renderWorldCopies: false, maxTileCacheSize: mobile ? 35 : 60});
+ } catch (e) { clearTimeout(mapLoadTimer); $('map').innerHTML = '<div class="map-fallback"><p>This browser can’t display the interactive map (WebGL unavailable). Directions are still listed as text.</p></div>'; mapLoading('Map rendering is unavailable in this browser. Text directions remain available.', false); map = null; return; }
  map.touchZoomRotate.disableRotation();
  if (matchMedia('(min-width: 600px)').matches) map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'top-right');
  map.addControl(new maplibregl.ScaleControl({unit: 'metric'}), 'bottom-left');
  map.on('style.load', addOverlays);
+ map.on('load', mapReady);
+ map.on('idle', () => { if (map && map.isStyleLoaded()) mapReady(); });
  map.on('error', e => { if (e && e.error) console.warn('Map:', e.error.message); });
  map.getCanvas().setAttribute('aria-label', 'Interactive map. Use arrow keys to pan and plus or minus to zoom.');
  map.on('click', 'reports-circle', e => {
@@ -171,7 +206,7 @@ function selectStyle(style) {
  if (!STYLES[style]) return;
  state.mapStyle = style; save();
  ['liberty', 'positron', 'onemap'].forEach(s => $('provider-' + s).setAttribute('aria-pressed', String(s === style)));
- if (map) map.setStyle(STYLES[style]);
+ if (map) { mapHasRendered = false; mapLoading('Loading '+(style === 'onemap' ? 'OneMap' : 'map')+' tiles…'); clearTimeout(mapLoadTimer);mapLoadTimer=setTimeout(mapTimeout,9000);map.setStyle(STYLES[style]); }
 }
 
 /* ------------------------------------------------------------ bottom sheet + pages */
