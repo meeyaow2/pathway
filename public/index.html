@@ -9,6 +9,9 @@
 <meta name="description" content="Pathway: accessibility-first walking routes in Singapore. Compare wheelchair-profile and standard walking routes, with honest information about what is and isn't verified.">
 <title>Pathway — accessible walking routes in Singapore</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236941C6'/%3E%3Cpath d='M9 23c4-1 4-6 7-8s7-1 7-6' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='23' r='2.5' fill='%23F2EDFF'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+<link rel="dns-prefetch" href="//tiles.openfreemap.org">
+<link rel="preconnect" href="https://www.onemap.gov.sg" crossorigin>
 <link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -37,6 +40,11 @@
 <div class="app" id="app" data-sheet="peek" data-page="planner">
  <div id="map" role="region" aria-label="Map. Every route on the map is also described as text in the journey panel.">
   <div class="map-fallback"><p>Loading Singapore map…</p></div>
+  <div id="map-load-status" class="map-load-status" role="status" aria-live="polite" hidden>
+   <span id="map-load-message">Loading map tiles…</span>
+   <button type="button" id="map-retry" hidden>Retry map</button>
+   <button type="button" id="map-try-onemap" hidden>Use OneMap</button>
+  </div>
  </div>
 
  <div id="offline-banner" class="banner hidden" role="alert">You're offline. Search and routing need a connection; saved journeys are still available.</div>
