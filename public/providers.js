@@ -15,7 +15,10 @@
 const SG = {latMin: 1.15, latMax: 1.48, lngMin: 103.59, lngMax: 104.1};
 const CONFIG = {
  photon: 'https://photon.komoot.io/api/',
+ nominatim: 'https://nominatim.openstreetmap.org/search', // backup: explicit searches only (policy: no autocomplete, max 1 req/s)
  valhalla: 'https://valhalla1.openstreetmap.de/route',
+ trace: 'https://valhalla1.openstreetmap.de/trace_attributes',
+ exits: 'data/mrt-exits.json', // official LTA MRT station exits (bundled snapshot)
  valhallaGapMs: 1100, // FOSSGIS policy: max 1 request/second
  timeoutMs: 20000,
 };
@@ -24,12 +27,16 @@ class ProviderError extends Error {
  constructor(message, kind) { super(message); this.kind = kind || 'error'; }
 }
 
-async function getJSON(url, name, timeoutMs = CONFIG.timeoutMs) {
+async function getJSON(url, name, timeoutMs = CONFIG.timeoutMs, signal) {
  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new ProviderError('You’re offline. Reconnect to search and get routes.', 'offline');
  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+ if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', () => ctrl.abort(), {once: true}); }
  let res;
  try { res = await fetch(url, {signal: ctrl.signal, headers: {Accept: 'application/json'}}); }
- catch (e) { throw new ProviderError(e.name === 'AbortError' ? name + ' took too long to respond. Please try again.' : name + ' is unreachable. Check your connection and try again.', 'network'); }
+ catch (e) {
+  if (signal && signal.aborted) throw new ProviderError('Cancelled.', 'aborted');
+  throw new ProviderError(e.name === 'AbortError' ? name + ' took too long to respond. Please try again.' : name + ' is unreachable. Check your connection and try again.', 'network');
+ }
  finally { clearTimeout(timer); }
  if (res.status === 429) throw new ProviderError(name + ' is busy (rate limit). Wait a few seconds and try again.', 'rate');
  let data = null;
@@ -52,7 +59,14 @@ function cached(key, ttlMs, fn) {
  return value;
 }
 
-/* ---------------- search */
+/* ---------------- search
+ * 1. Local index of official MRT stations and exits (instant, works offline and when every service is down).
+ * 2. Photon (OpenStreetMap) for as-you-type suggestions. After an error or rate limit it is paused with
+ *    back-off (30 s, doubling to 5 min) so Pathway stops adding load to a struggling free service.
+ * 3. Nominatim (OpenStreetMap Foundation) only when the person explicitly searches (Enter / Search key) and
+ *    Photon failed or found nothing. Its usage policy forbids autocomplete and allows max 1 request/second.
+ */
+const APPROX_TYPES = /^(road|street|suburb|neighbourhood|quarter|city_district|district|city|county|state|locality|residential|place|highway)$/;
 function normalisePhoton(data) {
  const out = [], seen = new Set();
  for (const f of (data && data.features) || []) {
@@ -66,15 +80,108 @@ function normalisePhoton(data) {
   const address = [street, p.district || p.city, ('Singapore ' + postal).trim()].filter(Boolean).join(', ');
   const key = name + '|' + lat.toFixed(4) + '|' + lng.toFixed(4);
   if (seen.has(key)) continue; seen.add(key);
-  out.push({name, address, postal, lat, lng});
+  const approximate = !p.housenumber && !/^\d{6}$/.test(p.name || '') && (APPROX_TYPES.test(p.type || '') || APPROX_TYPES.test(p.osm_key || '') && p.osm_key !== 'railway');
+  out.push({name, address, postal, lat, lng, approximate, source: 'photon'});
  }
  return out.slice(0, 8);
 }
-function search(query) {
- const q = String(query || '').trim();
- if (q.length < 2 || q.length > 100) return Promise.reject(new ProviderError('Type at least 2 characters.', 'input'));
+function normaliseNominatim(data) {
+ const out = [];
+ for (const d of Array.isArray(data) ? data : []) {
+  const lat = Number(d.lat), lng = Number(d.lon), a = d.address || {};
+  if (!inSG({lat, lng}) || (a.country_code && a.country_code !== 'sg')) continue;
+  const street = [a.house_number, a.road].filter(Boolean).join(' ');
+  const name = d.name || street || String(d.display_name || '').split(',')[0];
+  const address = [street !== name ? street : '', a.suburb || a.city_district || a.neighbourhood, ('Singapore ' + (a.postcode || '')).trim()].filter(Boolean).join(', ');
+  out.push({name, address, postal: a.postcode || '', lat, lng, approximate: APPROX_TYPES.test(d.addresstype || d.type || ''), source: 'nominatim'});
+ }
+ return out.slice(0, 8);
+}
+
+// Official MRT station exits (LTA). Loaded once, on first use.
+let exitsPromise = null;
+const exitNum = e => { const m = /(\d+)|([A-Z])$/i.exec(e); return m ? (m[1] ? Number(m[1]) : m[2].charCodeAt(0)) : 0; };
+function loadExits() {
+ if (!exitsPromise) exitsPromise = getJSON(CONFIG.exits, 'Station exit data', 15000).then(d => {
+  const byStation = new Map();
+  for (const [station, exit, lat, lng] of d.exits) {
+   if (!byStation.has(station)) byStation.set(station, []);
+   byStation.get(station).push({station, exit, lat, lng});
+  }
+  const stations = [...byStation].map(([name, exits]) => ({name, exits: exits.sort((a, b) => exitNum(a.exit) - exitNum(b.exit)),
+   lat: exits.reduce((t, e) => t + e.lat, 0) / exits.length, lng: exits.reduce((t, e) => t + e.lng, 0) / exits.length}));
+  return {meta: {source: d.source, licence: d.licence, updated: d.updated, note: d.note}, stations, byName: new Map(stations.map(s => [s.name.toLowerCase(), s]))};
+ }).catch(e => { exitsPromise = null; throw e; });
+ return exitsPromise;
+}
+const tokens = q => q.toLowerCase().replace(/\b(mrt|lrt|stn|station|exit)\b/g, ' ').replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+async function searchLocal(query) {
+ const q = String(query || '').trim(); if (q.length < 3 || /^\d+$/.test(q)) return [];
+ let data; try { data = await loadExits(); } catch { return []; }
+ const words = tokens(q), exitWanted = /\bexit\s*([a-z]?\d+[a-z]?|[a-z])\b/i.exec(q);
+ if (!words.length) return [];
+ const hits = data.stations.filter(s => words.filter(w => !exitWanted || w !== exitWanted[1].toLowerCase()).every(w => s.name.toLowerCase().includes(w)))
+  .sort((a, b) => a.name.length - b.name.length).slice(0, 3); // closest (shortest) name first: "Orchard MRT" before "Orchard Boulevard MRT"
+ const out = [];
+ for (const s of hits) {
+  const ex = exitWanted && s.exits.find(e => e.exit.toLowerCase() === ('exit ' + exitWanted[1]).toLowerCase());
+  if (ex) out.push({name: s.name + ', ' + ex.exit, address: 'Station exit · official LTA location', lat: ex.lat, lng: ex.lng, source: 'lta', station: s.name, exit: ex.exit});
+  out.push({name: s.name, address: s.exits.length + ' exits · official LTA locations · you can pick an exit after choosing', lat: s.lat, lng: s.lng, source: 'lta', station: s.name});
+ }
+ return out;
+}
+function nearbyStations(point, radius = 250) {
+ return loadExits().then(d => d.stations.filter(s => s.exits.some(e => metresApprox(point, e) <= radius))).catch(() => []);
+}
+function metresApprox(a, b) { const k = 111320, dx = (a.lng - b.lng) * k * Math.cos(a.lat * Math.PI / 180), dy = (a.lat - b.lat) * k; return Math.hypot(dx, dy); }
+
+const photonState = {pausedUntil: 0, failures: 0};
+const photonAvailable = () => Date.now() >= photonState.pausedUntil;
+function photonFailed() { photonState.failures++; photonState.pausedUntil = Date.now() + Math.min(300000, 30000 * 2 ** (photonState.failures - 1)); }
+function readSession(key) { try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); return v && v.exp > Date.now() ? v.data : null; } catch { return null; } }
+function writeSession(key, data) { try { sessionStorage.setItem(key, JSON.stringify({exp: Date.now() + 30 * 60e3, data})); } catch {} }
+function photon(q, signal) {
+ const key = 'pw-s:' + q.toLowerCase(), hit = readSession(key);
+ if (hit) return Promise.resolve(hit);
  const params = new URLSearchParams({q, limit: '10', lat: '1.3521', lon: '103.8198', lang: 'en', bbox: [SG.lngMin, SG.latMin, SG.lngMax, SG.latMax].join(',')});
- return cached('s:' + q.toLowerCase(), 10 * 60e3, async () => ({provider: 'photon', results: normalisePhoton(await getJSON(CONFIG.photon + '?' + params, 'Address search'))}));
+ return cached('s:' + q.toLowerCase(), 10 * 60e3, async () => {
+  const r = normalisePhoton(await getJSON(CONFIG.photon + '?' + params, 'Address search', 12000, signal));
+  photonState.failures = 0; writeSession(key, r); return r;
+ });
+}
+let lastNominatim = 0;
+async function nominatim(q) {
+ const key = 'pw-n:' + q.toLowerCase(), hit = readSession(key); if (hit) return hit;
+ const wait = lastNominatim + 1100 - Date.now(); if (wait > 0) await new Promise(r => setTimeout(r, wait));
+ lastNominatim = Date.now();
+ const params = new URLSearchParams({q, format: 'jsonv2', addressdetails: '1', countrycodes: 'sg', limit: '8', 'accept-language': 'en',
+  viewbox: [SG.lngMin, SG.latMax, SG.lngMax, SG.latMin].join(','), bounded: '1'});
+ const r = normaliseNominatim(await getJSON(CONFIG.nominatim + '?' + params, 'Backup address search', 15000));
+ writeSession(key, r); return r;
+}
+const merge = (a, b) => { const out = [...a]; for (const r of b) if (!out.some(o => metresApprox(o, r) < 30 && o.name.toLowerCase() === r.name.toLowerCase())) out.push(r); return out.slice(0, 8); };
+
+/** mode 'suggest' (as you type) or 'submit' (explicit search). Never throws for provider failures: returns a status. */
+async function search(query, {mode = 'suggest', signal} = {}) {
+ const q = String(query || '').trim();
+ if (q.length < 2 || q.length > 100) throw new ProviderError('Type at least 3 characters.', 'input');
+ const local = await searchLocal(q);
+ let primary = null, primaryError = null;
+ if (photonAvailable()) {
+  try { primary = await photon(q, signal); }
+  catch (e) { if (e.kind === 'aborted') throw e; if (e.kind !== 'offline') photonFailed(); primaryError = e; }
+ }
+ if (primary && (primary.length || mode === 'suggest')) return {status: 'ok', provider: 'photon', results: merge(local, primary)};
+ if (mode === 'suggest') return {status: 'degraded', provider: 'local', results: local,
+  message: primaryError && primaryError.kind === 'offline' ? primaryError.message : 'Live suggestions are paused because the search service is busy. Press Enter to search with the backup service.'};
+ try {
+  const backup = await nominatim(q);
+  return {status: backup.length || local.length ? 'fallback' : 'empty', provider: 'nominatim', results: merge(local, backup),
+   message: primary ? '' : 'Results from the backup search (OpenStreetMap Nominatim).'};
+ } catch (e) {
+  return {status: local.length ? 'degraded' : 'unavailable', provider: 'local', results: local,
+   message: e.kind === 'offline' ? e.message : 'Address search is temporarily unavailable. ' + (local.length ? 'Showing MRT stations only. ' : '') + 'Please try again in a minute, or search for an MRT station.'};
+ }
 }
 
 /* Reverse geocoding for "Where am I?" — only on explicit request; the position is not stored. */
@@ -114,7 +221,7 @@ function kindOf(m) {
  return 'walk';
 }
 function normaliseValhalla(data, profile) {
- const trip = data.trip; const geometry = [], steps = [];
+ const trip = data.trip; const geometry = [], steps = [], shapes = trip.legs.map(l => l.shape);
  for (const leg of trip.legs) {
   const offset = geometry.length;
   geometry.push(...decodePolyline(leg.shape, 6));
@@ -129,7 +236,7 @@ function normaliseValhalla(data, profile) {
  steps.forEach(s => { if (s.kind in counts) counts[s.kind]++; });
  const warnings = [];
  if (profile === 'wheelchair' && counts.stairs) warnings.push('Map data shows stairs on this route even with the wheelchair profile.');
- return {profile, label: PROFILES[profile].label, note: PROFILES[profile].note, provider: 'valhalla',
+ return {profile, shapes, label: PROFILES[profile].label, note: PROFILES[profile].note, provider: 'valhalla',
   distance_m: Math.round(trip.summary.length * 1000), duration_s: Math.round(trip.summary.time), geometry, steps, counts, warnings,
   accessibility_verified: false,
   evidence: 'Based on OpenStreetMap community data. Kerb heights, slopes, ramps, lift status and crossing safety are not verified.'};
@@ -145,12 +252,14 @@ function throttled(fn) {
  queue = run.catch(() => {});
  return run;
 }
-function route(start, end, profile = 'standard', {preferLifts = false} = {}) {
+function route(start, end, profile = 'standard', {preferLifts = false, exclude = []} = {}) {
  if (!inSG(start) || !inSG(end)) return Promise.reject(new ProviderError('Both points must be in Singapore.', 'input'));
  if (start.lat === end.lat && start.lng === end.lng) return Promise.reject(new ProviderError('Start and destination are the same place.', 'input'));
  const costing = Object.assign({}, PROFILES[profile].costing, preferLifts ? {elevator_penalty: 0} : {});
  const body = {locations: [{lat: +start.lat.toFixed(6), lon: +start.lng.toFixed(6)}, {lat: +end.lat.toFixed(6), lon: +end.lng.toFixed(6)}],
   costing: 'pedestrian', costing_options: {pedestrian: costing}, directions_options: {units: 'kilometers', language: 'en-US'}};
+ // Points the person asked to avoid (e.g. a lift that's out of service). Valhalla routes around the nearest path.
+ if (exclude.length) body.exclude_locations = exclude.slice(0, 10).map(p => ({lat: +p.lat.toFixed(6), lon: +p.lng.toFixed(6)}));
  const url = CONFIG.valhalla + '?json=' + encodeURIComponent(JSON.stringify(body)); // GET avoids a CORS preflight
  return cached('r:' + url, 5 * 60e3, () => throttled(async () => normaliseValhalla(await getJSON(url, 'The routing service', 25000), profile)));
 }
@@ -162,6 +271,25 @@ async function compareRoutes(start, end, opts = {}) {
  }
  if (!routes.length) throw new ProviderError(errors[0].error, errors[0].kind);
  return {routes, errors};
+}
+
+/* ---------------- route details for the Journey Accessibility Summary
+ * Valhalla trace_attributes describes every segment of a computed route using OpenStreetMap data:
+ * what it is (footway, steps, elevator, road crossing, road…), surface, tunnel and bridge flags.
+ * Grade/slope values exist too but come from a coarse elevation model (we saw 56% "upward grade" on a level
+ * Orchard Road segment), so Pathway deliberately ignores them.
+ */
+function normaliseEdges(data) {
+ return ((data && data.edges) || []).map(e => ({use: e.use || 'other', length_m: Math.round((e.length || 0) * 1000), surface: e.surface || '',
+  tunnel: !!e.tunnel, bridge: !!e.bridge, indoor: !!e.indoor, sidewalk: e.sidewalk || '', begin: e.begin_shape_index, end: e.end_shape_index}));
+}
+function routeDetails(route) {
+ if (!route || !route.shapes || !route.shapes.length) return Promise.reject(new ProviderError('No route geometry.', 'input'));
+ const body = {encoded_polyline: route.shapes[0], shape_match: 'edge_walk', costing: 'pedestrian',
+  costing_options: {pedestrian: Object.assign({}, PROFILES[route.profile] ? PROFILES[route.profile].costing : {})},
+  filters: {attributes: ['edge.use', 'edge.length', 'edge.surface', 'edge.tunnel', 'edge.bridge', 'edge.indoor', 'edge.sidewalk', 'edge.begin_shape_index', 'edge.end_shape_index'], action: 'include'}};
+ const url = CONFIG.trace + '?json=' + encodeURIComponent(JSON.stringify(body));
+ return cached('t:' + url, 10 * 60e3, () => throttled(async () => ({edges: normaliseEdges(await getJSON(url, 'Route details', 25000)), retrieved: new Date().toISOString()})));
 }
 
 /* ---------------- demo reports (this browser only) */
@@ -186,7 +314,7 @@ class LocalReportStore {
 
 function inSG(p) { return !!p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && p.lat >= SG.latMin && p.lat <= SG.latMax && p.lng >= SG.lngMin && p.lng <= SG.lngMax; }
 
-const api = {CONFIG, SG, PROFILES, ProviderError, search, reverse, route, compareRoutes, decodePolyline, normalisePhoton, normaliseValhalla, LocalReportStore, inSG,
+const api = {normaliseEdges, CONFIG, SG, PROFILES, ProviderError, search, searchLocal, loadExits, nearbyStations, metresApprox, photonState, normaliseNominatim, routeDetails, reverse, route, compareRoutes, decodePolyline, normalisePhoton, normaliseValhalla, LocalReportStore, inSG,
  attribution: 'Search: Photon by komoot · Routing: Valhalla (FOSSGIS) · Data © OpenStreetMap contributors'};
 root.PathwayProviders = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

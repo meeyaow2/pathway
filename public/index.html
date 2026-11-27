@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#6941C6">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://www.onemap.gov.sg; connect-src 'self' https://photon.komoot.io https://valhalla1.openstreetmap.de https://tiles.openfreemap.org https://www.onemap.gov.sg; worker-src 'self' blob:; child-src blob:; font-src 'self'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://www.onemap.gov.sg; connect-src 'self' https://photon.komoot.io https://nominatim.openstreetmap.org https://valhalla1.openstreetmap.de https://tiles.openfreemap.org https://www.onemap.gov.sg; worker-src 'self' blob:; child-src blob:; font-src 'self'; base-uri 'self'; form-action 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="description" content="Pathway: accessibility-first walking routes in Singapore. Compare wheelchair-profile and standard walking routes, with honest information about what is and isn't verified.">
 <title>Pathway — accessible walking routes in Singapore</title>
@@ -115,6 +115,7 @@
 
      <div class="row-between"><h3 class="h3" id="routes-heading">Route options</h3><span class="muted small" id="route-source">Awaiting addresses</span></div>
      <div id="routes" class="routes" role="group" aria-labelledby="routes-heading"></div>
+     <section class="entrances hidden" id="entrances" aria-labelledby="entrances-heading"></section>
      <div class="cta-row">
       <button type="button" id="plan" class="btn primary">Get walking directions</button>
       <button type="button" id="cta-start" class="btn primary hidden"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Start guidance</button>
@@ -129,6 +130,7 @@
        <div><dt>From</dt><dd id="sum-from">Not chosen</dd></div>
        <div><dt>To</dt><dd id="sum-to">Not chosen</dd></div>
        <div><dt>Route</dt><dd id="sum-route">None yet</dd></div>
+       <div><dt>Access</dt><dd id="sum-access">—</dd></div>
       </dl>
       <p class="latest" id="latest-instruction">Choose a start and destination to hear the route.</p>
       <p id="journey-message" class="muted">Start guidance to follow your approximate progress with GPS.</p>
@@ -142,9 +144,21 @@
       </div>
       <div class="btn-row">
        <button type="button" id="where-am-i" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Where am I?</button>
-       <button type="button" id="journey-recalculate" class="btn" disabled><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Reroute from here</button>
        <button type="button" id="show-map" class="btn audio-only"><svg class="icon" aria-hidden="true"><use href="#i-route"/></svg>Show map</button>
       </div>
+      <details class="recovery" id="recovery">
+       <summary>Something changed?</summary>
+       <p class="small muted">If a lift is out of service, an entrance can’t be used, a path is blocked or you’re unsure where you are. Pathway can suggest other options, but it can’t confirm they’re accessible or safe.</p>
+       <div class="btn-row">
+        <button type="button" id="journey-recalculate" class="btn" disabled><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Reroute from here</button>
+        <button type="button" id="rec-compare" class="btn">Compare routes</button>
+        <button type="button" id="rec-exit" class="btn hidden">Choose another exit</button>
+        <button type="button" id="rec-report" class="btn">Report a barrier here</button>
+        <button type="button" id="rec-overview" class="btn">Back to overview</button>
+       </div>
+       <h4 class="h4">Avoid a lift, stairs or crossing</h4>
+       <div id="avoid-list"></div>
+      </details>
       <p id="gps-status" class="small muted">GPS is off. Location is never stored.</p>
       <details class="voice-settings" id="voice-settings">
        <summary>Voice and alert settings</summary>
@@ -251,7 +265,7 @@
    <div class="field"><label for="where">Where is it?</label><input id="where" required minlength="3" maxlength="120" placeholder="e.g. Lift at Exit B, Orchard MRT" autocomplete="off"></div>
    <div class="field"><label for="report-pin">Map position</label>
     <select id="report-pin"><option value="center">Centre of the map</option><option value="gps">My current GPS position</option><option value="end">My destination</option><option value="start">My starting point</option><option value="none">Don't add a map position</option></select></div>
-   <div class="field"><label for="category">Barrier type</label><select id="category"><option>Lift not working</option><option>Steps / no ramp</option><option>Blocked footpath</option><option>Steep slope</option><option>Uneven pavement</option><option>Crossing difficult</option><option>No shelter</option><option>Other access issue</option></select></div>
+   <div class="field"><label for="category">Barrier type</label><select id="category"><option>Lift not working</option><option>Blocked path</option><option>Unexpected stairs</option><option>Missing or unusable ramp</option><option>Uneven pavement</option><option>Difficult crossing</option><option>Inaccessible entrance</option><option>Missing shelter</option><option>Steep slope</option><option>Other access issue</option></select></div>
    <div class="field"><label for="description">What did you notice?</label><textarea id="description" required minlength="10" maxlength="1000" rows="4" aria-describedby="description-hint description-error"></textarea>
     <p class="small muted" id="description-hint">At least 10 characters.</p><p class="field-error hidden" id="description-error"></p></div>
    <div class="btn-row end"><button type="button" class="btn" id="cancel-report">Cancel</button><button type="submit" class="btn primary" id="submit-report">Save demo report</button></div>
@@ -265,6 +279,7 @@
 
 <script src="providers.js" defer></script>
 <script src="audio.js" defer></script>
+<script src="access.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>

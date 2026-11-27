@@ -12,6 +12,10 @@ const PLACES = [
   ['Orchard MRT Station', 'Orchard Road', '238872', 1.30425, 103.83206], ['Orchard', '', '', 1.3048, 103.8318],
   ['Somerset MRT Station', 'Orchard Road', '238885', 1.30062, 103.83864], ['Paragon', 'Orchard Road', '238859', 1.3035, 103.8355], ['Paragon Medical Suites', 'Orchard Road', '238859', 1.3037, 103.8357],
 ];
+async function nominatimFixture(route) {
+  const body = [{lat: '1.3035', lon: '103.8355', name: 'Paragon', addresstype: 'building', address: {road: 'Orchard Road', house_number: '290', postcode: '238859', suburb: 'Orchard', country_code: 'sg'}}];
+  await route.fulfill({status: 200, contentType: 'application/json', headers: {'access-control-allow-origin': '*'}, body: JSON.stringify(body)});
+}
 async function photonFixture(route) {
   const u = new URL(route.request().url()), q = (u.searchParams.get('q') || '').toLowerCase();
   const words = q.split(/\s+/).filter(w => w.length > 2), score = n => words.filter(w => n.toLowerCase().includes(w)).length;
@@ -44,7 +48,7 @@ async function pick(page, which, query, how = 'keyboard') {
   // service). LIVE_SEARCH=1 calls the real Photon API instead. Routing (Valhalla) is always live.
   if (!process.env.LIVE_SEARCH) {
     const newContext = browser.newContext.bind(browser);
-    browser.newContext = async opts => { const c = await newContext(opts); await c.route(/photon\.komoot\.io/, photonFixture); return c; };
+    browser.newContext = async opts => { const c = await newContext(opts); await c.route(/photon\.komoot\.io/, photonFixture); await c.route(/nominatim\.openstreetmap\.org/, nominatimFixture); return c; };
   }
   // ---------------- core journey on an iPhone-sized touch device
   const ctx = await browser.newContext({...devices['iPhone 13'], permissions: ['geolocation'], geolocation: ORCHARD});
@@ -80,6 +84,8 @@ async function pick(page, which, query, how = 'keyboard') {
   await ctx.setGeolocation({latitude: 1.3150, longitude: 103.8450, accuracy: 12});
   await page.waitForFunction(() => document.getElementById('journey-badge').textContent === 'POSSIBLY OFF ROUTE', null, {timeout: 15000}).catch(() => {});
   ok('off-route warning', await page.locator('#journey-badge').innerText() === 'POSSIBLY OFF ROUTE');
+  ok('off-route opens the "Something changed?" recovery options', await page.locator('#recovery').evaluate(d => d.open));
+  await page.evaluate(() => { document.getElementById('recovery').open = true; });
   await page.locator('#journey-recalculate').click();
   await page.waitForFunction(() => /Rerouted|failed/.test(document.getElementById('toast').textContent), null, {timeout: 40000});
   ok('reroute from current GPS position', /Rerouted/.test(await page.locator('#toast').innerText()), await page.locator('#toast').innerText());
@@ -124,6 +130,71 @@ async function pick(page, which, query, how = 'keyboard') {
   ok('no JavaScript errors in journey', errors.filter(e => !/tiles|Failed to load resource/.test(e)).length === 0, errors.join(' | '));
   await ctx.close();
 
+  // ---------------- Scenario A: wheelchair user, MRT station → nearby building; exits, accessibility details, avoiding a point
+  {
+    const wctx = await browser.newContext({...devices['iPhone 13']});
+    await wctx.addInitScript(() => localStorage.setItem('pathway-v3', JSON.stringify({prefs: {stepfree: true, avoidstairs: true, lifts: true, avoidroads: true}, access: {wheelchair: true}})));
+    const w = await wctx.newPage(); const werr = []; w.on('pageerror', e => werr.push(e.message));
+    await w.goto(URL_, {waitUntil: 'networkidle'});
+    await pick(w, 'start', 'Orchard MRT', 'keyboard');
+    ok('A: official station result chosen', /^Orchard MRT Station$/.test(await w.locator('#start-search').inputValue()), await w.locator('#start-search').inputValue());
+    await pick(w, 'end', 'Paragon', 'keyboard');
+    await w.waitForSelector('.route-card', {timeout: 40000});
+    await w.waitForSelector('#entrances [data-exit]', {timeout: 15000});
+    const exitsText = await w.locator('#entrances').innerText();
+    ok('A: station exits offered with official-data label and access caveat', /Official/.test(exitsText) && /step-free access isn’t in open data/.test(exitsText) && /Exit \d/.test(exitsText));
+    await w.locator('#entrances [data-exit^="Exit"]').first().click();
+    await w.waitForFunction(() => /Exit/.test(document.getElementById('start-search').value), null, {timeout: 10000});
+    await w.waitForSelector('.route-card', {timeout: 40000});
+    await w.waitForFunction(() => document.querySelectorAll('.access-details').length > 0, null, {timeout: 45000}).catch(() => {});
+    const det = await w.locator('.access-details').first().evaluate(d => { d.open = true; return d.innerText; }).catch(() => '');
+    ok('A: accessibility details show stairs, lifts, unknowns and the exit caveat', /Stairs\./.test(det) && /Lifts\./.test(det) && /Unknown/.test(det) && /Lift status/.test(det) && /Starts at Orchard MRT Station Exit/.test(det), det.replace(/\s+/g, ' ').slice(-700));
+    ok('A: no overclaiming language', !/step-free route|fully accessible|wheelchair accessible|lift is working/i.test(det));
+    ok('A: chips on route cards', await w.locator('.route-card .achip').count() > 0);
+    await w.locator('#sheet-handle').click(); await w.locator('#sheet-handle').click();
+    await w.evaluate(() => { document.getElementById('recovery').open = true; });
+    const avoid = w.locator('[data-avoid]');
+    if (await avoid.count()) {
+      await avoid.first().click();
+      await w.waitForFunction(() => window.__pathway.state.exclude.length === 1 && !window.__pathway.state.planning, null, {timeout: 40000});
+      ok('A: avoid a lift/stairs/crossing replans around that point', await w.locator('.route-card').count() > 0 && /Avoiding 1 point/.test(await w.locator('#avoid-list').innerText()));
+    } else ok('A: avoid list explains when nothing to avoid', /No lifts, stairs or crossings/.test(await w.locator('#avoid-list').innerText()));
+    ok('A: no JavaScript errors', werr.length === 0, werr.join(' | '));
+    await w.screenshot({path: path.join(OUT, 'scenario-a-wheelchair.png')});
+    await wctx.close();
+  }
+
+  // ---------------- Search reliability: primary fails → paused suggestions → explicit search uses the backup
+  {
+    const sctx = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+    await sctx.route(/photon\.komoot\.io/, r => r.fulfill({status: 429, headers: {'access-control-allow-origin': '*'}, body: '{}'}));
+    const sp = await sctx.newPage(); await sp.goto(URL_, {waitUntil: 'networkidle'});
+    await sp.fill('#end-search', 'paragon'); await sp.waitForTimeout(1200);
+    ok('search: primary failure is explained, not silent', /busy|paused/i.test(await sp.locator('#address-status').innerText()), await sp.locator('#address-status').innerText());
+    await sp.locator('#end-search').press('Enter');
+    await sp.waitForSelector('#end-suggestions [role=option]', {timeout: 15000}).catch(() => {});
+    ok('search: explicit search falls back to the backup service', /backup/.test(await sp.locator('#address-status').innerText()) && /Paragon/.test(await sp.locator('#end-suggestions').innerText()), await sp.locator('#address-status').innerText());
+    await sp.fill('#start-search', 'somerset mrt'); await sp.waitForTimeout(1200);
+    ok('search: official MRT stations still found while the service is down', /Somerset MRT Station/.test(await sp.locator('#start-suggestions').innerText()));
+    await sctx.close();
+  }
+
+  // ---------------- Scenario D: Deaf / hard of hearing — visual-only alerts, nothing depends on sound
+  {
+    const dctx2 = await browser.newContext({...devices['iPhone 13'], permissions: ['geolocation'], geolocation: ORCHARD});
+    await dctx2.addInitScript(() => {
+      localStorage.setItem('pathway-v3', JSON.stringify({prefs: {stepfree: true, lifts: true, visual: true, spoken: true}}));
+      window.__spoken = []; Object.defineProperty(window, 'speechSynthesis', {value: {speaking: false, cancel() {}, getVoices: () => [], speak(u) { window.__spoken.push(u.text); }}, configurable: true});
+      window.__toasts = []; addEventListener('DOMContentLoaded', () => new MutationObserver(() => window.__toasts.push(document.getElementById('toast').textContent)).observe(document.getElementById('toast'), {childList: true, characterData: true, subtree: true}));
+    });
+    const d2 = await dctx2.newPage(); await d2.goto(URL_, {waitUntil: 'networkidle'});
+    await d2.click('[data-sample=orchard]'); await d2.waitForSelector('.route-card', {timeout: 40000});
+    await d2.locator('#cta-start').click(); await d2.waitForTimeout(1500);
+    const toasts = await d2.evaluate(() => window.__toasts.join(' | '));
+    ok('D: guidance updates appear on screen, never spoken', /Guidance started/.test(toasts) && (await d2.evaluate(() => window.__spoken.length)) === 0, toasts.slice(0, 80));
+    await dctx2.close();
+  }
+
   // ---------------- audio mode: plan and follow a journey without the map
   {
     const actx = await browser.newContext({...devices['iPhone 13'], permissions: ['geolocation'], geolocation: ORCHARD});
@@ -144,6 +215,9 @@ async function pick(page, which, query, how = 'keyboard') {
     ok('route card has a concise spoken label', /minutes/.test(label) && /Not verified/.test(label), label);
     await a.waitForFunction(() => window.__spoken.some(t => /routes? found/.test(t)), null, {timeout: 5000}).catch(() => {});
     ok('route comparison spoken', (await a.evaluate(() => window.__spoken.join(' | '))).includes('Option 1'));
+    await a.waitForFunction(() => window.__spoken.some(t => /^Accessibility details ready/.test(t)), null, {timeout: 45000}).catch(() => {});
+    const accSpoken = await a.evaluate(() => window.__spoken.find(t => /^Accessibility details ready/.test(t)) || '');
+    ok('B: accessibility summary spoken, separating recorded facts from unknowns', /recorded/.test(accSpoken) && /Unknown: lift status/.test(accSpoken), accSpoken.slice(0, 140));
     await a.locator('#guide-start').click();
     await a.waitForFunction(() => window.__spoken.some(t => t.startsWith('Guidance started')), null, {timeout: 5000});
     ok('guidance start summary includes limits', /can’t detect crossings, obstacles or entrances/.test(await a.evaluate(() => window.__spoken.find(t => t.startsWith('Guidance started')))));

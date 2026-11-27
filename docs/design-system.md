@@ -111,6 +111,16 @@ Pathway is designed to be compact without being cramped. **Visible size and touc
 | **Toast** | Ink background, white text | `role="status"` |
 | **Directions** `.steps` | Numbered circles; current step = purple. Stairs/Lift/Crossing labels in text | Ordered list |
 
+### Journey Accessibility Summary components
+| Component | Anatomy | Accessibility |
+|---|---|---|
+| **Confidence badge** `.conf` | ✓ *Official* (purple fill), half-filled circle *Map data* (purple outline), ⚑ *Report* (orange outline), ? *Unknown* (dashed) | The icon is decorative; the word is always present |
+| **Accessibility chip** `.achip` | 12px pill on route cards; amber when it flags a possible barrier | Its text is also in the route card's accessible name |
+| **Accessibility details** `details.access-details` | Collapsed by default; one row per attribute (badge + **label** + text), then the source and *Read details aloud* | A native `details`/`summary` disclosure |
+| **Trade-off line** `.tradeoff` | One muted sentence under the selected route | Plain text |
+| **Station exit chips** | The chip pattern; nearest 6 exits, then "All N exits" | `role=group` labelled "Leaving from / Arriving at …" |
+| **Recovery panel** `details.recovery` | "Something changed?"; opens automatically when you may be off route | Native disclosure; 40px buttons |
+
 ## Map
 | Element | Style | Distinguished by |
 |---|---|---|
